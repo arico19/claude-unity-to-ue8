@@ -19,9 +19,17 @@ LIGHT_CLASSES = {
 }
 
 
+def _skeletal_as_static(c: dict) -> bool:
+    """Modelo con skin que UE no pudo importar como SkeletalMesh (p.ej. varios huesos raíz) y quedó
+    como StaticMesh: se muestra como malla estática en vez de dejar el componente vacío."""
+    if c.get("type") != "SkeletalMesh" or resolve_mesh(c.get("mesh"), skeletal=True) is not None:
+        return False
+    return resolve_mesh(c.get("mesh")) is not None
+
+
 def component_class(c: dict):
     t = c.get("type")
-    if t == "StaticMesh":
+    if t == "StaticMesh" or _skeletal_as_static(c):
         return unreal.StaticMeshComponent
     if t == "SkeletalMesh":
         return unreal.SkeletalMeshComponent
@@ -65,6 +73,10 @@ def _collision(comp, c: dict) -> None:
 def configure(comp, c: dict, node: dict, item: str) -> None:
     """Aplica las propiedades del componente convertido ``c`` al componente UE ``comp``."""
     t = c.get("type")
+    if _skeletal_as_static(c):
+        LOG.warn(STEP, item, "Malla con skin importada como estática: se usa StaticMeshComponent (sin animación)")
+        c = dict(c, type="StaticMesh")
+        t = "StaticMesh"
     try:
         if t == "StaticMesh":
             mesh = resolve_mesh(c.get("mesh"))

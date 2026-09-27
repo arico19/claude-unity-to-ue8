@@ -119,7 +119,8 @@ class LevelBuilder:
             extra_scale = (primary.get("mesh") or {}).get("extra_scale")
             scaled_with_children = extra_scale and extra_scale != [1.0, 1.0, 1.0] and node.get("children")
             if not scaled_with_children:
-                cls, comp_prop = PRIMARY_ACTORS[primary["type"]]
+                ptype = "StaticMesh" if comps._skeletal_as_static(primary) else primary["type"]
+                cls, comp_prop = PRIMARY_ACTORS[ptype]
                 actor = self._spawn(cls, node)
                 comp = actor.get_editor_property(comp_prop)
                 comps.configure(comp, primary, node, item)

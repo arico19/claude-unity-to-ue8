@@ -87,6 +87,16 @@ class Shooter:
         return False
 
     def tick(self, _dt: float) -> None:
+        # load_level hace tick de Slate por dentro: evita reentrar en el callback.
+        if getattr(self, "_busy", False):
+            return
+        self._busy = True
+        try:
+            self._tick()
+        finally:
+            self._busy = False
+
+    def _tick(self) -> None:
         try:
             if self.wait > 0:
                 self.wait -= 1

@@ -53,7 +53,10 @@ def unity_key_to_ue(name: str) -> str | None:
 
 
 def _write(path: Path, content: str) -> None:
+    """Escribe sólo si cambia: reescribir un .h idéntico cambia su fecha y UE recompila todo el módulo."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.read_text(encoding="utf-8", errors="replace") == content:
+        return
     path.write_text(content, encoding="utf-8")
 
 

@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--ue-root", help="Carpeta de UE 5.8 (por defecto: UE_ROOT o Epic Launcher)")
     u.add_argument("--skip-build", action="store_true", help="No compilar el módulo C++")
     u.add_argument("--no-screenshots", action="store_true", help="No abrir el editor para hacer capturas")
-    u.add_argument("--steps", help="Sólo estos pasos, separados por comas: build,import,verify,screenshots")
+    u.add_argument("--steps", help="Sólo estos pasos, separados por comas: build,import,verify,screenshots,play")
     u.set_defaults(func=_cmd_ue)
 
     f = sub.add_parser("full", parents=[c], add_help=False, conflict_handler="resolve",
@@ -136,6 +136,9 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--skip-build", action="store_true", help="No compilar el módulo C++")
     f.add_argument("--no-screenshots", action="store_true", help="No abrir el editor para hacer capturas")
     f.set_defaults(func=_cmd_full)
+
+    g = sub.add_parser("gui", help="Aplicación de Windows: elegir proyecto Unity y destino y convertir todo")
+    g.set_defaults(func=lambda _a: __import__("unity2ue.gui", fromlist=["main"]).main())
 
     args = parser.parse_args(argv)
     return int(args.func(args) or 0)

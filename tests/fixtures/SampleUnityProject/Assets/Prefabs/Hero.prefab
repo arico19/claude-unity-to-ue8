@@ -1,0 +1,127 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &100
+GameObject:
+  m_Component:
+  - component: {fileID: 101}
+  m_Layer: 0
+  m_Name: Hero
+  m_TagString: Untagged
+  m_IsActive: 1
+--- !u!4 &101
+Transform:
+  m_GameObject: {fileID: 100}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children:
+  - {fileID: 201}
+  - {fileID: 301}
+  m_Father: {fileID: 0}
+--- !u!1 &200
+GameObject:
+  m_Component:
+  - component: {fileID: 201}
+  - component: {fileID: 202}
+  m_Layer: 0
+  m_Name: Body
+  m_TagString: Untagged
+  m_IsActive: 1
+--- !u!4 &201
+Transform:
+  m_GameObject: {fileID: 200}
+  m_LocalRotation: {x: -0.70710678, y: 0, z: 0, w: 0.70710678}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 101}
+--- !u!137 &202
+SkinnedMeshRenderer:
+  m_GameObject: {fileID: 200}
+  m_Enabled: 1
+  m_Materials: []
+  m_Mesh: {fileID: 0}
+  m_Bones:
+  - {fileID: 301}
+  - {fileID: 401}
+  - {fileID: 501}
+  m_RootBone: {fileID: 301}
+--- !u!1 &300
+GameObject:
+  m_Component:
+  - component: {fileID: 301}
+  m_Layer: 0
+  m_Name: Hips
+  m_TagString: Untagged
+  m_IsActive: 1
+--- !u!4 &301
+Transform:
+  m_GameObject: {fileID: 300}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 1, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children:
+  - {fileID: 401}
+  - {fileID: 501}
+  m_Father: {fileID: 101}
+--- !u!1 &400
+GameObject:
+  m_Component:
+  - component: {fileID: 401}
+  m_Layer: 0
+  m_Name: Spine
+  m_TagString: Untagged
+  m_IsActive: 1
+--- !u!4 &401
+Transform:
+  m_GameObject: {fileID: 400}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.3, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 301}
+--- !u!1 &500
+GameObject:
+  m_Component:
+  - component: {fileID: 501}
+  m_Layer: 0
+  m_Name: Hand
+  m_TagString: Untagged
+  m_IsActive: 1
+--- !u!4 &501
+Transform:
+  m_GameObject: {fileID: 500}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.5, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children:
+  - {fileID: 601}
+  m_Father: {fileID: 301}
+--- !u!1 &600
+GameObject:
+  m_Component:
+  - component: {fileID: 601}
+  - component: {fileID: 602}
+  - component: {fileID: 603}
+  m_Layer: 0
+  m_Name: Gun
+  m_TagString: Untagged
+  m_IsActive: 1
+--- !u!4 &601
+Transform:
+  m_GameObject: {fileID: 600}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0.2}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 501}
+--- !u!33 &602
+MeshFilter:
+  m_GameObject: {fileID: 600}
+  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!23 &603
+MeshRenderer:
+  m_GameObject: {fileID: 600}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_Materials: []

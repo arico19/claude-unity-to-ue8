@@ -124,7 +124,7 @@ def test_analyze(sample_project):
     assert data["render_pipeline"] == "URP"
     assert data["unity_version"] == "2022.3.20f1"
     assert data["asset_counts"]["script"] == 4
-    assert data["component_usage"]["MeshFilter"] == 3
+    assert data["component_usage"]["MeshFilter"] == 4
     assert data["api_usage"]["legacy_input"] == 1
 
 
@@ -138,3 +138,32 @@ def test_scriptable_object_assets(converted):
     assert rifle["properties"]["display_name"]["value"] == "Rifle"
     sound = rifle["properties"]["fire_sound"]["value"]["resolved"]
     assert sound["ue_path"] == "/Game/Unity/Audio/Shot.Shot"
+
+
+def test_skinned_mesh_ignores_node_rotation_and_prunes_bones(converted):
+    """La malla con skin no hereda la corrección de ejes del nodo FBX y los huesos vacíos desaparecen."""
+    bps = _load(converted, "blueprints.json")
+    hero = next(p for p in bps["prefabs"] if p["unity_path"] == "Assets/Prefabs/Hero.prefab")
+    names = {n["name"]: n for n in iter_nodes([hero["root"]])}
+    body = names["Body"]
+    assert body["skinned_transform_ignored"]
+    assert body["transform"]["rotation_quat"] == [0.0, 0.0, 0.0, 1.0]
+    assert "Spine" not in names  # hueso sin nada colgado
+    assert {"Hips", "Hand", "Gun"} <= set(names)  # la cadena que lleva el arma se conserva
+
+
+def test_reconvert_keeps_unchanged_files(tmp_path, sample_project):
+    """Reconvertir no reescribe ficheros idénticos: si no, UE recompila todo el módulo (~45 min)."""
+    import os
+
+    from unity2ue.config import ConversionConfig
+    from unity2ue.pipeline import convert_project
+
+    cfg = ConversionConfig(project_name="Sample Game")
+    result = convert_project(sample_project, tmp_path, cfg, log=lambda _m: None)
+    files = [result.out_dir / "Source/SampleGame/UnityCompat/UnityBehaviour.h",
+             result.out_dir / "Source/SampleGame/Unity/RotatorComponent.h"]
+    for f in files:
+        os.utime(f, (1_000_000_000, 1_000_000_000))
+    convert_project(sample_project, tmp_path, cfg, log=lambda _m: None)
+    assert all(f.stat().st_mtime == 1_000_000_000 for f in files)

@@ -127,6 +127,30 @@ class UERunner:
             self.log("  El editor no terminó a tiempo; capturas parciales")
         return sorted(str(p) for p in out.glob("*.png")) if out.exists() else []
 
+    def play_test(self, level: str | None = None) -> list[str]:
+        """Pulsa Play en el nivel, hace capturas durante la partida y guarda el log del juego."""
+        self.log("[UE] Prueba de juego (Play automático, se abre el editor ~1 min)...")
+        exe = self.ue / "Engine" / "Binaries" / "Win64" / "UnrealEditor.exe"
+        out = self.dir / "Unity2UE" / "play"
+        shutil.rmtree(out, ignore_errors=True)
+        env = dict(os.environ)
+        if level:
+            env["UNITY2UE_PLAY_LEVEL"] = level
+        log_path = self.logs / "play.log"
+        try:
+            with open(log_path, "w", encoding="utf-8", errors="replace") as fh:
+                subprocess.run([str(exe), str(self.uproject), "-ExecutePythonScript=unity2ue_import/play_test.py",
+                                "-unattended", "-nosplash", "-nop4", "-log"], stdout=fh, stderr=subprocess.STDOUT,
+                               timeout=900, cwd=self.dir, env=env)
+        except subprocess.TimeoutExpired:
+            self.log("  El editor no terminó a tiempo")
+        game_log = self.dir / "Saved" / "Logs" / f"{self.module}.log"
+        if game_log.exists():
+            lines = [ln for ln in game_log.read_text("utf-8", "replace").splitlines()
+                     if "LogUnity" in ln or "[unity2ue][play]" in ln or "Error" in ln]
+            (self.logs / "play_game.log").write_text(chr(10).join(lines), encoding="utf-8")
+        return sorted(str(p) for p in out.glob("*.png")) if out.exists() else []
+
     # ---------------------------------------------------------------- informe
     def write_summary(self, built: bool, imp: dict, ver: dict, shots: list[str]) -> Path:
         lines = ["# Resultado de la prueba en Unreal Engine", "",
@@ -172,6 +196,8 @@ class UERunner:
         imp = self.import_content() if "import" in steps else self._load("import_log.json")
         ver = self.verify() if "verify" in steps else self._load("verify.json")
         shots = self.screenshots() if "screenshots" in steps else []
+        if "play" in steps:
+            shots += self.play_test()
         summary = self.write_summary(built, imp, ver, shots)
         self.log(f"\nResumen: {summary}")
         ok = built and imp and not imp.get("summary", {}).get("error")

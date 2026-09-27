@@ -150,8 +150,10 @@ class Converter:
                     entry["status"] = "translated"
                 else:
                     h_path.parent.mkdir(parents=True, exist_ok=True)
-                    h_path.write_text(header, "utf-8")
-                    c_path.write_text(cpp, "utf-8")
+                    # Sólo si cambian: una fecha nueva obliga a UE a recompilar lo que los incluye.
+                    for path, text in ((h_path, header), (c_path, cpp)):
+                        if not path.exists() or path.read_text("utf-8", errors="replace") != text:
+                            path.write_text(text, "utf-8")
                     entry["status"] = "stub"
                 entry["header"] = h_path.relative_to(out).as_posix()
                 entry["source"] = c_path.relative_to(out).as_posix()

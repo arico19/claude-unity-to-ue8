@@ -290,7 +290,45 @@ class HierarchyConverter:
             roots.sort(key=lambda r: rank.get(id(r[1]), 1 << 31))
         else:
             roots.sort(key=lambda r: r[0])
-        return [n for _, n in roots]
+        result = [n for _, n in roots]
+        self._fix_skinned_meshes(result)
+        return result
+
+    def _fix_skinned_meshes(self, roots: list[dict[str, Any]]) -> None:
+        """Ajustes para modelos con esqueleto (SkinnedMeshRenderer).
+
+        * En Unity la malla con skin la colocan sus huesos, no el transform de su GameObject (que
+          en los FBX suele llevar la corrección de ejes, -90 en X). UE ya aplica esa corrección al
+          importar y coloca la SkeletalMesh respecto a la raíz del modelo, así que el nodo de la
+          malla pasa a transform identidad (si no, el personaje sale tumbado).
+        * Los huesos (GameObjects sin componentes referenciados en m_Bones) no aportan nada en UE:
+          ya están en el esqueleto. Se eliminan salvo que lleven algo colgado (p.ej. un arma).
+        """
+        bones: set[int] = set()
+        for smr in self.doc.by_class(C.SKINNED_MESH_RENDERER):
+            bones |= {ref_file_id(b) for b in smr.get("m_Bones") or []}
+            bones.add(ref_file_id(smr.get("m_RootBone")))
+        bones.discard(0)
+        tid_of = {id(n): tid for tid, n in self.nodes_by_transform.items()}
+        identity = transform_to_ue({"x": 0, "y": 0, "z": 0}, {"x": 0, "y": 0, "z": 0, "w": 1}, {"x": 1, "y": 1, "z": 1})
+        pruned = 0
+
+        def visit(node: dict[str, Any]) -> bool:
+            """Devuelve True si el nodo debe conservarse."""
+            nonlocal pruned
+            node["children"] = [c for c in node.get("children", []) if visit(c)]
+            if any(c.get("type") == "SkeletalMesh" for c in node.get("components", [])):
+                node["transform"] = dict(identity)
+                node["skinned_transform_ignored"] = True
+            is_bone = tid_of.get(id(node)) in bones
+            if is_bone and not node.get("components") and not node["children"] and not node.get("prefab"):
+                pruned += 1
+                return False
+            return True
+
+        roots[:] = [r for r in roots if visit(r)]
+        if pruned:
+            self.ctx.info(self.path, f"{pruned} huesos sin nada colgado omitidos (ya están en el esqueleto de UE)")
 
     def environment(self) -> dict[str, Any]:
         rs = next(iter(self.doc.by_class(C.RENDER_SETTINGS)), None)
