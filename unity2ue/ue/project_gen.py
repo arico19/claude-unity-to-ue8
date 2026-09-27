@@ -146,15 +146,16 @@ def default_engine_ini(cfg: ConversionConfig, default_map: str | None, gravity_z
         "r.DefaultFeature.AutoExposure=False",
         "r.DynamicGlobalIlluminationMethod=1",
         "r.ReflectionMethod=1",
-        "r.Shadow.Virtual.Enable=1",
-        # Lumen y sombras virtuales exigen DX12 + Shader Model 6; sin esto UE 5.8 avisa al abrir
-        # el proyecto de que falta configuración.
+        # DX11 + SM5: DX12 provoca DXGI_ERROR_DEVICE_REMOVED en GPUs como la GTX 1070. Las
+        # sombras virtuales exigen DX12 + SM6 (UE avisa de configuración incompleta), así que se
+        # usan sombras clásicas; Lumen funciona en SM5 con trazado por software.
+        "r.Shadow.Virtual.Enable=0",
         "r.GenerateMeshDistanceFields=True",
         "",
         "[/Script/WindowsTargetPlatform.WindowsTargetSettings]",
-        "DefaultGraphicsRHI=DefaultGraphicsRHI_DX12",
-        "-TargetedRHIs=PCD3D_SM5",
-        "+TargetedRHIs=PCD3D_SM6",
+        "DefaultGraphicsRHI=DefaultGraphicsRHI_DX11",
+        "-TargetedRHIs=PCD3D_SM6",
+        "+TargetedRHIs=PCD3D_SM5",
         "",
         "[/Script/Engine.PhysicsSettings]",
         f"DefaultGravityZ={gravity_z:.3f}",

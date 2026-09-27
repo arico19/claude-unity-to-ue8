@@ -24,11 +24,12 @@ def test_key_mapping():
     assert unity_key_to_ue("mouse 0") == "LeftMouseButton"
 
 
-def test_default_engine_ini_targets_dx12_sm6():
-    """Sin DX12 + SM6 UE 5.8 avisa al abrir el proyecto (Lumen y sombras virtuales lo exigen)."""
+def test_default_engine_ini_targets_dx11_sm5():
+    """DX12 cuelga la GPU en equipos como GTX 1070; DX11 + SM5 sin sombras virtuales (exigen SM6)."""
     from unity2ue.config import ConversionConfig
     from unity2ue.ue.project_gen import default_engine_ini
 
     ini = default_engine_ini(ConversionConfig(), "/Game/Unity/Maps/Main", -981.0, {})
-    assert "DefaultGraphicsRHI=DefaultGraphicsRHI_DX12" in ini
-    assert "+TargetedRHIs=PCD3D_SM6" in ini
+    assert "DefaultGraphicsRHI=DefaultGraphicsRHI_DX11" in ini
+    assert "+TargetedRHIs=PCD3D_SM5" in ini
+    assert "r.Shadow.Virtual.Enable=0" in ini
