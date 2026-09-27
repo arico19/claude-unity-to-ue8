@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: 708192a3b4c5d6e7f809102132435465
+ModelImporter:
+  serializedVersion: 22200
+  internalIDToNameTable:
+  - first:
+      1: 919132149155446097
+    second: Rock
+  - first:
+      43: -5495902117074765545
+    second: Rock_Mesh
+  animationType: 0
+  meshes:
+    globalScale: 1
+    useFileScale: 1
+  animations:
+    clipAnimations: []

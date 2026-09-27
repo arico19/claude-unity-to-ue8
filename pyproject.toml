@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unity2ue"
+version = "0.1.0"
+description = "Conversor de proyectos Unity a Unreal Engine 5.8, diseñado para usarse con Claude Code"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.4"]
+
+[project.scripts]
+unity2ue = "unity2ue.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["unity2ue*"]
+
+[tool.setuptools.package-data]
+unity2ue = ["ue/templates/**/*", "ue_editor/**/*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I"]
+ignore = ["E501", "B904"]
