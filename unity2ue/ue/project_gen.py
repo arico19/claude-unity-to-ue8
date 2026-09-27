@@ -147,6 +147,14 @@ def default_engine_ini(cfg: ConversionConfig, default_map: str | None, gravity_z
         "r.DynamicGlobalIlluminationMethod=1",
         "r.ReflectionMethod=1",
         "r.Shadow.Virtual.Enable=1",
+        # Lumen y sombras virtuales exigen DX12 + Shader Model 6; sin esto UE 5.8 avisa al abrir
+        # el proyecto de que falta configuración.
+        "r.GenerateMeshDistanceFields=True",
+        "",
+        "[/Script/WindowsTargetPlatform.WindowsTargetSettings]",
+        "DefaultGraphicsRHI=DefaultGraphicsRHI_DX12",
+        "-TargetedRHIs=PCD3D_SM5",
+        "+TargetedRHIs=PCD3D_SM6",
         "",
         "[/Script/Engine.PhysicsSettings]",
         f"DefaultGravityZ={gravity_z:.3f}",
