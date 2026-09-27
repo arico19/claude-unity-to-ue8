@@ -43,6 +43,26 @@ manuales (`/tareas-manuales`).
 | agente `cpp-reviewer` | Revisa errores de compilación/UHT y fidelidad al C# |
 | agente `ue-content-builder` | Scripts Python de editor para contenido no automatizable |
 
+## Conversión automática completa (un solo comando)
+
+```bat
+convertir.bat "C:\Proyectos\MiJuegoUnity" "C:\Proyectos\MiJuegoUE" MiJuego
+```
+
+o `python -m unity2ue full <ProyectoUnity> <DestinoUE> --name MiJuego`. Hace todo sin intervención:
+
+1. Convierte el proyecto Unity (igual que `convert`).
+2. Localiza UE 5.8 (`--ue-root`, `UE_ROOT` o la instalación del Epic Launcher) y compila el módulo C++.
+3. Importa dentro del editor (`run_all.py`): assets, materiales, input, Blueprints y niveles.
+4. Verifica cada nivel (`verify.py` → `Unity2UE/verify.json`): actores, luces, cámaras, scripts,
+   mallas y materiales vacíos, Blueprints con errores.
+5. Abre el editor y captura cada nivel desde la cámara de Unity y en vista general
+   (`screenshots.py` → `Unity2UE/screenshots/*.png`); el editor se cierra solo.
+
+El resumen queda en `Unity2UE/resultado_ue.md` y los logs de cada paso en `Unity2UE/logs/`.
+Opciones: `--skip-build`, `--no-screenshots`. Para repetir sólo los pasos de Unreal sobre un
+proyecto ya convertido: `python -m unity2ue ue <DestinoUE>`.
+
 ## Uso manual (CLI)
 
 ```bash
@@ -127,8 +147,9 @@ Consulta `CLAUDE.md` para las convenciones internas.
 
 ## Limitaciones conocidas
 
-- Los scripts del editor de Unreal no pueden probarse sin el motor; se validan en sintaxis.
-  La API Python de UE cambia entre versiones: si algo falla, `import_log.json` indica el paso.
+- Los scripts del editor de Unreal se han probado con UE 5.8.1 en Windows (`unity2ue full`); en CI
+  sólo se validan en sintaxis. La API Python de UE cambia entre versiones: si algo falla,
+  `import_log.json` indica el paso.
 - La lógica C# no se traduce de forma determinista: el toolkit genera declaraciones compilables
   y los cuerpos los traducen los agentes de Claude (revisa siempre el resultado).
 - Shaders personalizados, UI, animación, VFX y terrenos requieren trabajo asistido.

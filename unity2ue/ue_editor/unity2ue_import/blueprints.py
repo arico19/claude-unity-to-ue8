@@ -31,10 +31,23 @@ def _sds():
 
 
 def _obj(handle):
-    return LIB.get_object(LIB.get_data(handle))
+    data = LIB.get_data(handle)
+    getter = getattr(LIB, "get_associated_object", None) or LIB.get_object
+    return getter(data)
+
+
+def _scene_root_handle(bp):
+    """Handle actual del componente raíz (los handles pueden invalidarse al cambiar la raíz)."""
+    for h in _sds().k2_gather_subobject_data_for_blueprint(bp):
+        if LIB.is_root_component(LIB.get_data(h)):
+            return h
+    return None
 
 
 def _add(bp, parent_handle, cls, name: str):
+    # Un handle padre inválido provoca un check() que cierra el editor: mejor fallar en Python.
+    if not LIB.is_handle_valid(parent_handle) or LIB.get_data(parent_handle) is None:
+        raise RuntimeError(f"Handle padre inválido al añadir {name}")
     params = unreal.AddNewSubobjectParams(parent_handle=parent_handle, new_class=cls, blueprint_context=bp)
     handle, fail = _sds().add_new_subobject(params)
     if not LIB.is_handle_valid(handle):
@@ -57,12 +70,13 @@ def _unique(name: str, used: set[str]) -> str:
 
 
 def _apply_rigidbody(comp, rb: dict, item: str) -> None:
-    set_prop(comp, "simulate_physics", not rb.get("kinematic", False), STEP, item)
-    set_prop(comp, "enable_gravity", bool(rb.get("enable_gravity", True)))
-    set_prop(comp, "linear_damping", float(rb.get("linear_damping", 0.0)))
-    set_prop(comp, "angular_damping", float(rb.get("angular_damping", 0.0)))
+    # En UE 5.8 simulate_physics/gravedad/damping viven en body_instance, no en el componente.
     try:
         body = comp.get_editor_property("body_instance")
+        set_prop(body, "simulate_physics", not rb.get("kinematic", False), STEP, item)
+        set_prop(body, "enable_gravity", bool(rb.get("enable_gravity", True)), STEP, item)
+        set_prop(body, "linear_damping", float(rb.get("linear_damping", 0.0)), STEP, item)
+        set_prop(body, "angular_damping", float(rb.get("angular_damping", 0.0)), STEP, item)
         set_prop(body, "override_mass", True)
         set_prop(body, "mass_in_kg_override", float(rb.get("mass_kg", 1.0)))
         set_prop(body, "use_ccd", bool(rb.get("ccd", False)))
@@ -135,15 +149,37 @@ def _build_children(bp, parent_handle, node: dict, used: set[str], item: str) ->
             LOG.exception(STEP, f"{item}/{child.get('name')}")
 
 
+def _reuse_existing(package_path: str, parent_class, item: str):
+    """Reimportación: reutiliza el Blueprint existente quitándole todos sus componentes.
+
+    Borrar y recrear un asset con el mismo nombre en la misma sesión falla en UE 5.8 (el
+    paquete borrado sigue en memoria si otro asset lo referencia).
+    """
+    existing = load(package_path)
+    if not isinstance(existing, unreal.Blueprint):
+        return None
+    try:
+        if unreal.BlueprintEditorLibrary.get_blueprint_parent_class(existing) != parent_class:
+            unreal.BlueprintEditorLibrary.reparent_blueprint(existing, parent_class)
+        handles = list(_sds().k2_gather_subobject_data_for_blueprint(existing))
+        removable = [h for h in handles[1:]
+                     if not LIB.is_inherited_component(LIB.get_data(h)) and LIB.can_delete(LIB.get_data(h))]
+        if removable:
+            _sds().delete_subobjects(handles[0], removable, existing)
+        return existing
+    except Exception:  # noqa: BLE001
+        LOG.exception(STEP, f"{item}: reutilizar Blueprint existente")
+        return None
+
+
 def build_blueprint(package_path: str, root: dict, parent_class=None, item: str = "") -> object | None:
     folder, name = package_path.rsplit("/", 1)
     ensure_dir(folder)
-    existing = load(package_path)
-    if existing is not None:
-        unreal.EditorAssetLibrary.delete_loaded_asset(existing)
-    factory = unreal.BlueprintFactory()
-    factory.set_editor_property("parent_class", parent_class or unreal.Actor)
-    bp = ASSET_TOOLS.create_asset(name, folder, unreal.Blueprint, factory)
+    bp = _reuse_existing(package_path, parent_class or unreal.Actor, item)
+    if bp is None:
+        factory = unreal.BlueprintFactory()
+        factory.set_editor_property("parent_class", parent_class or unreal.Actor)
+        bp = ASSET_TOOLS.create_asset(name, folder, unreal.Blueprint, factory)
     if bp is None:
         LOG.error(STEP, item, f"No se pudo crear {package_path}")
         return None
@@ -174,7 +210,9 @@ def build_blueprint(package_path: str, root: dict, parent_class=None, item: str 
                 set_prop(comp, "relative_location", unreal.Vector(0, 0, 0))
                 _apply_rigidbody(comp, rb, item)
                 if _sds().make_new_scene_root(root_handle, h, bp):
-                    root_handle = h
+                    # Tras cambiar la raíz el handle antiguo puede quedar inválido y UE aborta
+                    # (check TargetAttachment) al añadir hijos: se vuelve a buscar.
+                    root_handle = _scene_root_handle(bp) or root_handle
                 skip.add(id(body))
             except Exception:  # noqa: BLE001
                 LOG.exception(STEP, f"{item}: raíz física")

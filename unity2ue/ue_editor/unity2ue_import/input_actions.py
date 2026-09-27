@@ -17,6 +17,14 @@ def _factory(*names):
     return None
 
 
+def _key(name: str) -> unreal.Key:
+    """unreal.Key no expone key_name en Python (UE 5.8): se construye con import_text."""
+    key = unreal.Key()
+    if not key.import_text(name):
+        raise ValueError(f"Tecla desconocida en UE: {name}")
+    return key
+
+
 def _set_negate(imc, action, key_name: str) -> bool:
     """Añade un modificador Negate al mapeo (la API cambió entre versiones de UE5)."""
     negate = unreal.new_object(unreal.InputModifierNegate, outer=imc)
@@ -29,7 +37,7 @@ def _set_negate(imc, action, key_name: str) -> bool:
             and not isinstance(container, (list, unreal.Array)) else container
         changed = False
         for m in mappings:
-            if m.get_editor_property("action") == action and str(m.get_editor_property("key").get_editor_property("key_name")) == key_name:
+            if m.get_editor_property("action") == action and m.get_editor_property("key").export_text() == key_name:
                 m.set_editor_property("modifiers", [negate])
                 changed = True
         if changed:
@@ -61,7 +69,7 @@ def run() -> None:
             set_prop(ia, "value_type", vt, STEP, name)
             save(ia)
             for m in a.get("mappings", []):
-                imc.map_key(ia, unreal.Key(key_name=m["key"]))
+                imc.map_key(ia, _key(m["key"]))
                 if m.get("negate") and not _set_negate(imc, ia, m["key"]):
                     LOG.warn(STEP, name, f"Añade manualmente el modificador Negate a {m['key']}")
             LOG.ok(STEP, a["name"], f"-> {folder}/{name}")

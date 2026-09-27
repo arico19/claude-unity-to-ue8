@@ -132,6 +132,7 @@ class ProjectType:
     kind: str  # component | data_asset | struct | enum | object | interface | library
     cpp_name: str  # con prefijo (UFoo, FBar, EBaz)
     header: str | None = None  # include relativo, p.ej. "Unity/Foo.h"
+    cs_type: object = field(default=None, compare=False, repr=False)  # CSType de origen (herencia)
 
 
 class TypeMapper:

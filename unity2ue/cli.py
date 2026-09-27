@@ -69,6 +69,29 @@ def _cmd_scripts(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ue(args: argparse.Namespace) -> int:
+    """Pasos dentro de Unreal sobre un proyecto ya convertido."""
+    from .ue_runner import UERunner, find_ue_root
+
+    runner = UERunner(Path(args.ue_project), find_ue_root(args.ue_root))
+    print(f"Unreal Engine: {runner.ue}")
+    steps = {s.strip() for s in args.steps.split(",")} if args.steps else None
+    return runner.run_all(build=not args.skip_build, screenshots=not args.no_screenshots, steps=steps)
+
+
+def _cmd_full(args: argparse.Namespace) -> int:
+    """Conversión completa: convert + compilar + importar + verificar + capturas."""
+    from .ue_runner import UERunner, find_ue_root
+
+    ue_root = find_ue_root(args.ue_root)  # falla pronto si no hay motor
+    print(f"Unreal Engine: {ue_root}\n")
+    code = _cmd_convert(args)
+    if code:
+        return code
+    runner = UERunner(Path(args.output), ue_root)
+    return runner.run_all(build=not args.skip_build, screenshots=not args.no_screenshots)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="unity2ue", description="Conversor de proyectos Unity a Unreal Engine 5.8")
     parser.add_argument("--version", action="version", version=f"unity2ue {__version__}")
@@ -98,6 +121,21 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("ue_project")
     s.add_argument("--pending", action="store_true")
     s.set_defaults(func=_cmd_scripts)
+
+    u = sub.add_parser("ue", help="Compila, importa, verifica y captura un proyecto UE ya convertido")
+    u.add_argument("ue_project")
+    u.add_argument("--ue-root", help="Carpeta de UE 5.8 (por defecto: UE_ROOT o Epic Launcher)")
+    u.add_argument("--skip-build", action="store_true", help="No compilar el módulo C++")
+    u.add_argument("--no-screenshots", action="store_true", help="No abrir el editor para hacer capturas")
+    u.add_argument("--steps", help="Sólo estos pasos, separados por comas: build,import,verify,screenshots")
+    u.set_defaults(func=_cmd_ue)
+
+    f = sub.add_parser("full", parents=[c], add_help=False, conflict_handler="resolve",
+                       help="Todo de una vez: convert + compilar + importar en UE + verificar + capturas")
+    f.add_argument("--ue-root", help="Carpeta de UE 5.8 (por defecto: UE_ROOT o Epic Launcher)")
+    f.add_argument("--skip-build", action="store_true", help="No compilar el módulo C++")
+    f.add_argument("--no-screenshots", action="store_true", help="No abrir el editor para hacer capturas")
+    f.set_defaults(func=_cmd_full)
 
     args = parser.parse_args(argv)
     return int(args.func(args) or 0)

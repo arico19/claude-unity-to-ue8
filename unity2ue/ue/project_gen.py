@@ -280,14 +280,16 @@ REM (p.ej. set UE_ROOT=C:\\Program Files\\Epic Games\\UE_5.8)
 if "%UE_ROOT%"=="" set UE_ROOT=C:\\Program Files\\Epic Games\\UE_5.8
 set PROJECT=%~dp0{module}.uproject
 
+if "%1"=="--skip-build" goto import
 echo [1/2] Compilando el módulo C++...
 call "%UE_ROOT%\\Engine\\Build\\BatchFiles\\Build.bat" {module}Editor Win64 Development -Project="%PROJECT%" -WaitMutex
 if errorlevel 1 (
   echo La compilacion fallo. Revisa los scripts convertidos en Source\\{module}\\Unity
   echo Puedes continuar la importacion sin C++ con: %~nx0 --skip-build
-  if not "%1"=="--skip-build" exit /b 1
+  exit /b 1
 )
 
+:import
 echo [2/2] Importando assets, materiales, blueprints y niveles...
 "%UE_ROOT%\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe" "%PROJECT%" -run=pythonscript -script="unity2ue_import/run_all.py" -unattended -nosplash -stdout -FullStdOutLogOutput
 """

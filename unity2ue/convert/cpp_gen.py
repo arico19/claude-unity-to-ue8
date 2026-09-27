@@ -194,7 +194,7 @@ def build_plans(files: dict[str, CSFile], naming_fn) -> tuple[list[ScriptPlan], 
             if cpp in used_cpp:
                 cpp = prefix + to_pascal(t.outer or stem) + base
             used_cpp.add(cpp)
-            project_types.setdefault(t.name, ProjectType(tk, cpp, header_rel))
+            project_types.setdefault(t.name, ProjectType(tk, cpp, header_rel, t))
     return plans, project_types
 
 
@@ -247,12 +247,26 @@ _AUTO_PROP = re.compile(r"\{\s*(?:(?:public|private|protected|internal)\s+)?get\
                         re.S)
 
 
+def _by_value(t: str) -> str:
+    """Tipo de retorno por valor: los stubs devuelven ``{}`` y una referencia a un temporal no compila."""
+    if t.startswith("const ") and t.endswith("&"):
+        return t[len("const "):-1].strip()
+    return t
+
+
 class CppGenerator:
     def __init__(self, module_name: str, project_types: dict[str, ProjectType]) -> None:
         self.module = module_name
         self.api = f"{module_name.upper()}_API"
         self.types = project_types
         self.mapper = TypeMapper(project_types)
+        # Nombres de miembros de la clase en curso: UHT no permite que un parámetro los oculte.
+        self._members: set[str] = set()
+        # UFUNCTION ya declaradas en la clase en curso: UHT no admite sobrecargas.
+        self._ufuncs: set[str] = set()
+        # Includes / declaraciones adelantadas del fichero en curso (también para parámetros y retornos).
+        self._includes: set[str] = set()
+        self._forwards: set[str] = set()
 
     # ----------------------------------------------------------- parámetros
     def _params(self, params: str) -> tuple[str, str, bool]:
@@ -273,8 +287,13 @@ class CppGenerator:
             mods = [t for t in tokens[:-2] if t in ("ref", "out", "in", "params", "this")]
             ptype = " ".join(t for t in tokens[:-1] if t not in ("ref", "out", "in", "params", "this"))
             pname = to_pascal(tokens[-1].lstrip("@"))
+            if pname in self._members:
+                pname = f"In{pname}"
             ct = self.mapper.map(ptype)
-            ok = ok and ct.uproperty
+            self._includes |= ct.includes
+            self._forwards |= ct.forward
+            # Los delegados dinámicos (FUnityEvent) no pueden ser parámetros de UFUNCTION.
+            ok = ok and ct.uproperty and ct.decl != "FUnityEvent"
             cpp_t = ct.param
             if "ref" in mods or "out" in mods:
                 cpp_t = ct.decl.replace("TObjectPtr<", "").rstrip(">") + "*&" if ct.is_object else f"{ct.decl}&"
@@ -349,7 +368,7 @@ class CppGenerator:
             else:
                 public.append("\t// TODO(unity2ue): propiedad C# con lógica -> getter/setter:")
                 public.append(_comment_block(p.source.strip()))
-                public.append(f"\t{ct.param} Get{name}() const;\n")
+                public.append(f"\t{_by_value(ct.param)} Get{name}() const;\n")
         return public, private
 
     def _method_decl(self, m: CSMethod, kind: str, overrides: bool, static_class: bool) -> tuple[str, str, str | None]:
@@ -359,8 +378,10 @@ class CppGenerator:
             ret, rest = sig.split(" ", 1)
             return f"\tvirtual {sig} override;", f"{ret} {{cls}}::{rest}", None
         ret_ct = self.mapper.map(m.return_type or "void")
+        self._includes |= ret_ct.includes
+        self._forwards |= ret_ct.forward
         note = None
-        ret = ret_ct.param
+        ret = _by_value(ret_ct.param)
         if m.return_type.split("<")[0] in ("IEnumerator", "IEnumerable") and m.name not in ("GetEnumerator",):
             ret = "void"
             note = "Corrutina Unity: usar FTimerHandle, FLatentActionInfo o UE5Coro."
@@ -370,6 +391,11 @@ class CppGenerator:
             name = f"{name}Unity"
         is_static = "static" in m.modifiers or static_class
         ufunc = ok and ret_ct.uproperty and "private" not in m.modifiers and kind != "struct"
+        # UHT: un override de un UFUNCTION no puede llevar UFUNCTION(), ni puede haber sobrecargas.
+        if "override" in m.modifiers or name in self._ufuncs:
+            ufunc = False
+        if ufunc and kind != "interface":
+            self._ufuncs.add(name)
         prefix = "static " if is_static else ("virtual " if ({"virtual", "abstract", "override"} & set(m.modifiers)) else "")
         suffix = " override" if "override" in m.modifiers and overrides else ""
         lines = []
@@ -407,6 +433,18 @@ class CppGenerator:
         includes.update(CLASS_INCLUDES.get(kind, []))
         public, private = self._fields_block(t, cpp, includes, forwards, field_map, statics, struct=(kind == "struct"))
         plan.field_maps[t.name] = field_map
+        self._members = set(field_map.values()) | {to_pascal(p.name) for p in t.properties}
+        self._ufuncs = set()
+        # Miembros y métodos heredados de clases base del proyecto: UHT tampoco permite
+        # ocultarlos con parámetros ni redeclarar UFUNCTION con el mismo nombre.
+        base, seen = project_base, set()
+        while base is not None and base.cs_type is not None and base.cpp_name not in seen:
+            seen.add(base.cpp_name)
+            bt = base.cs_type
+            self._members |= {cpp_property_name(f.name) for f in bt.fields} | {to_pascal(p.name) for p in bt.properties}
+            self._ufuncs |= {to_pascal(m.name) for m in bt.methods if not m.is_constructor}
+            base = next((self.types[re.sub(r"<.*>", "", b).split(".")[-1]] for b in bt.bases
+                         if re.sub(r"<.*>", "", b).split(".")[-1] in self.types), None)
 
         if kind == "struct":
             out = [f"USTRUCT(BlueprintType)\nstruct {cpp}\n{{\n\tGENERATED_BODY()\n"]
@@ -462,7 +500,7 @@ class CppGenerator:
                 ct = self.mapper.map(p.type, p.name)
                 name = to_pascal(p.name)
                 cpp_defs.append(
-                    f"{ct.param} {cpp}::Get{name}() const\n{{\n\t// TODO(unity2ue): traducir propiedad C#:\n"
+                    f"{_by_value(ct.param)} {cpp}::Get{name}() const\n{{\n\t// TODO(unity2ue): traducir propiedad C#:\n"
                     f"{_comment_block(p.source.strip())}\n\treturn {{}};\n}}"
                 )
         if method_lines:
@@ -483,6 +521,7 @@ class CppGenerator:
         """Devuelve (contenido .h, contenido .cpp)."""
         includes: set[str] = set()
         forwards: set[str] = set()
+        self._includes, self._forwards = includes, forwards
         sections: list[str] = []
         cpp_defs: list[str] = []
         file_types = plan.file.all_types()

@@ -36,6 +36,12 @@ def main(steps: tuple[str, ...] | None = None) -> str:
         materials.run(load_json("materials.json"))
     if "input" in steps:
         input_actions.run()
+    if "blueprints" in steps or "levels" in steps:
+        # Nivel vacío: que ningún nivel generado quede cargado mientras se reconstruye.
+        try:
+            unreal.EditorLoadingAndSavingUtils.new_blank_map(False)
+        except Exception:  # noqa: BLE001
+            pass
     if "blueprints" in steps:
         blueprints.run(load_json("blueprints.json"))
     if "levels" in steps:

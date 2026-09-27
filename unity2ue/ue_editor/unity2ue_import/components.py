@@ -68,7 +68,11 @@ def configure(comp, c: dict, node: dict, item: str) -> None:
     try:
         if t == "StaticMesh":
             mesh = resolve_mesh(c.get("mesh"))
-            if mesh is None:
+            if mesh is None and resolve_mesh(c.get("mesh"), skeletal=True) is not None:
+                # Parte rígida de un FBX con esqueleto: UE la importa fusionada en la SkeletalMesh.
+                LOG.add(STEP, item, "info", "Parte rígida incluida en la malla esquelética del modelo; se omite")
+                set_prop(comp, "visible", False)
+            elif mesh is None:
                 LOG.warn(STEP, item, f"Malla no encontrada: {c.get('mesh')}")
             else:
                 comp.set_editor_property("static_mesh", mesh)

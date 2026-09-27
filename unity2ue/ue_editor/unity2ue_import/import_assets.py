@@ -49,6 +49,48 @@ def _fbx_options(item: dict):
     return opts
 
 
+def _find_skeleton(dest: str):
+    """Esqueleto ya importado más cercano: misma carpeta de Unity, luego carpetas superiores."""
+    folder = dest.rsplit("/", 1)[0]
+    while folder.count("/") >= 2:
+        for p in unreal.EditorAssetLibrary.list_assets(folder, recursive=True, include_folder=False):
+            data = unreal.EditorAssetLibrary.find_asset_data(p)
+            if str(data.asset_class_path.asset_name) == "Skeleton":
+                return load(p)
+        folder = folder.rsplit("/", 1)[0]
+    return None
+
+
+def _retry_model(item: dict, src: str) -> list[str]:
+    """Reintenta un FBX esquelético que no produjo nada.
+
+    1. Sólo animación (FBX de Mixamo/Unity sin malla) sobre un esqueleto ya importado.
+    2. Malla estática (p.ej. varios huesos raíz, que UE no admite en mallas esqueléticas).
+    """
+    skeleton = _find_skeleton(item["destination_path"])
+    if skeleton is not None and item.get("import_animations"):
+        opts = _fbx_options(item)
+        set_prop(opts, "import_mesh", False)
+        set_prop(opts, "skeleton", skeleton)
+        set_prop(opts, "create_physics_asset", False)
+        set_prop(opts, "mesh_type_to_import", unreal.FBXImportType.FBXIT_ANIMATION)
+        task = _task(src, item["destination_path"], item["destination_name"], opts)
+        ASSET_TOOLS.import_asset_tasks([task])
+        paths = list(task.get_editor_property("imported_object_paths") or [])
+        if paths:
+            LOG.warn(STEP, item["unity_path"], f"Sólo animación: importada sobre el esqueleto {skeleton.get_path_name()} "
+                     "(revisa que los huesos coincidan)")
+            return paths
+    static = dict(item, skeletal=False, import_animations=False)
+    task = _task(src, item["destination_path"], item["destination_name"], _fbx_options(static))
+    ASSET_TOOLS.import_asset_tasks([task])
+    paths = list(task.get_editor_property("imported_object_paths") or [])
+    if paths:
+        LOG.warn(STEP, item["unity_path"], "No se pudo importar como malla esquelética (p.ej. varios huesos raíz): "
+                 "importada como malla estática, sin animación")
+    return paths
+
+
 def _configure_texture(tex, item: dict) -> None:
     name = item["destination_name"]
     if item.get("normal_map"):
@@ -103,11 +145,29 @@ def _set_legacy_fbx(enabled: bool) -> None:
         pass
 
 
-def run(data: dict | None) -> None:
+# Tipos que en UE 5.8 necesitan la UI de Slate: importarlos en un commandlet cierra el editor
+# (assert CurrentApplication.IsValid()). Se importan después en el editor con UI.
+NEEDS_UI = {"font"}
+
+
+def is_commandlet() -> bool:
+    try:
+        return "-run=" in unreal.SystemLibrary.get_command_line().lower()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def run(data: dict | None, only: set[str] | None = None) -> None:
     if not data:
         LOG.warn(STEP, "assets.json", "No hay assets que importar")
         return
-    items = data.get("imports", [])
+    items = [i for i in data.get("imports", []) if only is None or i["type"] in only]
+    if only is None and is_commandlet():
+        deferred = [i for i in items if i["type"] in NEEDS_UI]
+        items = [i for i in items if i["type"] not in NEEDS_UI]
+        for i in deferred:
+            LOG.warn(STEP, i["unity_path"], "Fuente: se importa al abrir el editor con UI (paso de capturas "
+                     "o import_assets.run(..., only={'font'}))")
     # Texturas primero (los materiales las necesitan), después modelos, audio, etc.
     order = {"texture": 0, "model": 1, "audio": 2, "font": 3, "video": 4}
     items.sort(key=lambda i: order.get(i["type"], 9))
@@ -129,6 +189,7 @@ def run(data: dict | None) -> None:
         batch.append((item, _task(src, item["destination_path"], item["destination_name"], opts)))
 
     # Importar por lotes para dar feedback y no perder todo ante un fallo.
+    retry: list[dict] = []
     chunk = 50
     for start in range(0, len(batch), chunk):
         part = batch[start:start + chunk]
@@ -142,11 +203,24 @@ def run(data: dict | None) -> None:
                 slow.enter_progress_frame(1, item["unity_path"])
                 paths = list(task.get_editor_property("imported_object_paths") or [])
                 if not paths:
-                    LOG.error(STEP, item["unity_path"], "La importación no produjo ningún asset")
+                    if item["type"] == "model" and item.get("skeletal") and item["file"].lower().endswith(".fbx"):
+                        retry.append(item)
+                    else:
+                        LOG.error(STEP, item["unity_path"], "La importación no produjo ningún asset")
                     continue
                 if item["type"] == "texture":
                     tex = load(paths[0])
                     if tex is not None:
                         _configure_texture(tex, item)
                 LOG.ok(STEP, item["unity_path"], f"-> {', '.join(str(p) for p in paths[:3])}")
+    # Reintentos al final, cuando ya existen los esqueletos del resto de modelos.
+    for item in retry:
+        try:
+            paths = _retry_model(item, os.path.join(project_dir(), item["file"]))
+            if paths:
+                LOG.ok(STEP, item["unity_path"], f"-> {', '.join(str(p) for p in paths[:3])}")
+            else:
+                LOG.error(STEP, item["unity_path"], "La importación no produjo ningún asset (ni como animación ni estática)")
+        except Exception:  # noqa: BLE001
+            LOG.exception(STEP, item["unity_path"])
     _set_legacy_fbx(False)

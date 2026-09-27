@@ -20,7 +20,10 @@ La conversión tiene tres capas:
 2. **Scripts del editor de Unreal (`unity2ue/ue_editor/unity2ue_import/`)** — se copian a
    `<ProyectoUE>/Content/Python/` y se ejecutan DENTRO de Unreal (`import unreal`): importan
    assets, crean materiales maestros + instancias, Blueprints (prefabs) y niveles (escenas).
-   No se pueden ejecutar aquí; sólo se comprueba que compilan (`tests/test_ue_editor_scripts.py`).
+   En CI sólo se comprueba que compilan (`tests/test_ue_editor_scripts.py`); con UE 5.8 instalado
+   se prueban de verdad con `python -m unity2ue ue <DestinoUE>` (`ue_runner.py`: compila, importa,
+   `verify.py` y `screenshots.py`). Los reimports reutilizan Blueprints y niveles existentes: borrar
+   y recrear un asset con el mismo nombre en la misma sesión falla en UE 5.8.
 3. **Agentes de Claude Code (`.claude/`)** — hacen lo que no es determinista: traducir los
    cuerpos de los métodos C# a C++ de UE, recrear UI/animación/VFX, revisar el resultado.
 
@@ -30,6 +33,8 @@ La conversión tiene tres capas:
 python3 -m unity2ue analyze <ProyectoUnity>                    # inventario + riesgos (no escribe)
 python3 -m unity2ue convert <ProyectoUnity> <DestinoUE> --name MiJuego
 python3 -m unity2ue scripts <DestinoUE> --pending              # cola de traducción C# -> C++
+python3 -m unity2ue full <ProyectoUnity> <DestinoUE> --name MiJuego  # todo: convert + UE (compilar, importar, verificar, capturas)
+python3 -m unity2ue ue <DestinoUE> [--steps import,verify,screenshots]  # sólo los pasos dentro de UE
 python3 -m pytest -q                                           # tests (fixture: tests/fixtures/SampleUnityProject)
 ruff check unity2ue tests
 ```

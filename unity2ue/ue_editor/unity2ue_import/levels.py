@@ -216,9 +216,13 @@ class LevelBuilder:
     # ------------------------------------------------------------ run
     def build(self) -> None:
         path = self.level["ue_level_path"]
-        if unreal.EditorAssetLibrary.does_asset_exist(path):
-            unreal.EditorAssetLibrary.delete_asset(path)
-        if not LES.new_level(path):
+        # Reimportación: se reutiliza el nivel vaciándolo. Borrar y recrear un asset con el mismo
+        # nombre en la misma sesión falla en UE 5.8 (el paquete borrado sigue en memoria).
+        if unreal.EditorAssetLibrary.does_asset_exist(path) and LES.load_level(path):
+            actors = EAS.get_all_level_actors()
+            if actors:
+                EAS.destroy_actors(actors)
+        elif not LES.new_level(path):
             raise RuntimeError(f"No se pudo crear el nivel {path}")
         roots = self.level.get("roots", [])
         with unreal.ScopedSlowTask(len(roots), f"unity2ue: nivel {self.name}") as slow:

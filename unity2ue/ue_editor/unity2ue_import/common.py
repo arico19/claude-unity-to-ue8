@@ -81,8 +81,8 @@ class ImportLog:
     def exception(self, step: str, item: str) -> None:
         self.add(step, item, "error", traceback.format_exc(limit=4))
 
-    def save(self) -> str:
-        path = os.path.join(data_dir(), "import_log.json")
+    def save(self, name: str = "import_log.json") -> str:
+        path = os.path.join(data_dir(), name)
         summary: dict[str, int] = {}
         for e in self.entries:
             summary[e["status"]] = summary.get(e["status"], 0) + 1
@@ -155,7 +155,8 @@ def resolve_mesh(ref: dict | None, skeletal: bool = False):
                     assets.append(a)
         _MODEL_CACHE[folder] = assets
     wanted_cls = unreal.SkeletalMesh if skeletal else unreal.StaticMesh
-    candidates = [a for a in _MODEL_CACHE[folder] if isinstance(a, wanted_cls)] or _MODEL_CACHE[folder]
+    # Sólo del tipo pedido: un StaticMeshComponent no admite una SkeletalMesh (TypeError en UE 5.8).
+    candidates = [a for a in _MODEL_CACHE[folder] if isinstance(a, wanted_cls)]
     sub = (ref.get("sub_name") or "").lower()
     if sub:
         for a in candidates:

@@ -70,3 +70,47 @@ def test_type_mapper():
     assert m.map("float[]").decl == "TArray<float>"
     assert m.map("GameObject", "enemyPrefab").decl == "TSubclassOf<AActor>"
     assert not m.map("NavMeshPath").uproperty
+
+
+def test_uht_rules_found_compiling_in_ue58():
+    """Errores reales de UHT/MSVC al compilar un proyecto Unity real en UE 5.8."""
+    base = """
+using UnityEngine;
+using UnityEngine.Events;
+using System.Collections.Generic;
+public class BaseUnit : MonoBehaviour {
+    public void Initialize(float hitDelay) {}
+    public virtual void Hit() {}
+}"""
+    child = """
+using UnityEngine;
+using System.Collections.Generic;
+public class Boss : BaseUnit {
+    [SerializeField] private float targetPos;
+    public List<int> Items => _items;
+    private List<int> _items;
+    public void Initialize() {}
+    public override void Hit() {}
+    public void Refresh() {}
+    public void Refresh(Vector3 p) {}
+    public void SetTargetPos(float targetPos) {}
+    public void Follow(Other other) {}
+    public void Subscribe(UnityEvent listener) {}
+}"""
+    out, _ = _gen({"Assets/BaseUnit.cs": base, "Assets/Boss.cs": child, "Assets/Other.cs": "using UnityEngine; public class Other : MonoBehaviour {}"})
+    _, header, cpp = out["Assets/Boss.cs"]
+    ufunc = '\tUFUNCTION(BlueprintCallable, Category = "Unity")\n'
+    # Método que oculta/sobrescribe uno del padre: sin UFUNCTION.
+    assert ufunc + "\tvoid Initialize();" not in header and "\tvoid Initialize();" in header
+    assert ufunc + "\tvirtual void Hit() override;" not in header
+    # Sobrecargas: sólo la primera es UFUNCTION.
+    assert header.count(ufunc + "\tvoid Refresh(") == 1
+    # Parámetro que oculta una propiedad: se renombra.
+    assert "void SetTargetPos(float InTargetPos);" in header
+    # Tipos de parámetros declarados en el header.
+    assert "class UOther;" in header or '#include "Other.h"' in header
+    # Delegado como parámetro: no puede ser UFUNCTION.
+    assert ufunc + "\tvoid Subscribe(" not in header
+    # Getter de colección por valor (return {} de una referencia no compila).
+    assert "TArray<int32> GetItems() const;" in header
+    assert "TArray<int32> UBoss::GetItems() const" in cpp
