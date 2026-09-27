@@ -9,3 +9,6 @@ dist/
 # Salidas de conversión locales
 /out/
 /output/
+
+# Paquetes generados
+*.zip
