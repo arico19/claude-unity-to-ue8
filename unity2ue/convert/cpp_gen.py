@@ -289,7 +289,7 @@ class CppGenerator:
             pname = to_pascal(tokens[-1].lstrip("@"))
             if pname in self._members:
                 pname = f"In{pname}"
-            ct = self.mapper.map(ptype)
+            ct = self.mapper.map(ptype, pname)
             self._includes |= ct.includes
             self._forwards |= ct.forward
             # Los delegados dinámicos (FUnityEvent) no pueden ser parámetros de UFUNCTION.

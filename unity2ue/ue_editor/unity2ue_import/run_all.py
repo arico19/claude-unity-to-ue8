@@ -20,10 +20,10 @@ if os.path.dirname(_HERE) not in sys.path:
 
 import unreal  # noqa: E402
 
-from unity2ue_import import blueprints, import_assets, input_actions, levels, materials  # noqa: E402
+from unity2ue_import import blueprints, data_assets, import_assets, input_actions, levels, materials  # noqa: E402
 from unity2ue_import.common import LOG, load_json  # noqa: E402
 
-ALL_STEPS = ("assets", "materials", "input", "blueprints", "levels")
+ALL_STEPS = ("assets", "materials", "input", "blueprints", "data", "levels")
 
 
 def main(steps: tuple[str, ...] | None = None) -> str:
@@ -44,6 +44,8 @@ def main(steps: tuple[str, ...] | None = None) -> str:
             pass
     if "blueprints" in steps:
         blueprints.run(load_json("blueprints.json"))
+    if "data" in steps:
+        data_assets.run(load_json("data_assets.json"))
     if "levels" in steps:
         levels.run(load_json("levels.json"))
     path = LOG.save()

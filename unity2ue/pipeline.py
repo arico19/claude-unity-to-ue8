@@ -27,6 +27,7 @@ from .convert.animators import convert_animator
 from .convert.context import ConversionContext, ScriptInfo
 from .convert.cpp_gen import CppGenerator, build_plans
 from .convert.csharp import CSFile, parse_csharp_file
+from .convert.data_assets import convert_data_asset
 from .convert.hierarchy import convert_prefab, convert_scene, iter_nodes
 from .convert.materials import convert_material
 from .naming import sanitize
@@ -347,6 +348,17 @@ class Converter:
             _json(out / "Unity2UE" / "animators.json", {"controllers": items, "anim_clips": clips})
         return {"animator_controllers": len(items), "anim_clips": len(clips)}
 
+    def phase_data_assets(self, out: Path) -> dict[str, Any]:
+        """Ficheros .asset de ScriptableObjects del proyecto -> DataAssets."""
+        items = []
+        for a in self._assets("asset"):
+            data = self._safe(lambda a=a: convert_data_asset(self.ctx, a.path), a.path)
+            if data:
+                items.append(data)
+        if items:
+            _json(out / "Unity2UE" / "data_assets.json", {"data_assets": items})
+        return {"data_assets": len(items)}
+
     def detect_features(self) -> None:
         pk = set(self.project.packages)
         flags = {
@@ -392,6 +404,8 @@ class Converter:
         stats.update(self.phase_assets(out, tex_usage))
         self.log("[6/7] Animator Controllers")
         stats.update(self.phase_animators(out))
+        self.log("      Datos (ScriptableObject .asset -> DataAsset)")
+        stats.update(self.phase_data_assets(out))
 
         self.log("[7/7] Proyecto Unreal Engine")
         levels = json.loads((out / "Unity2UE" / "levels.json").read_text("utf-8"))["levels"]

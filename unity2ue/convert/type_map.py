@@ -176,13 +176,20 @@ class TypeMapper:
                 return CppType(f"TScriptInterface<{pt.cpp_name.replace('U', 'I', 1)}>",
                                f"TScriptInterface<{pt.cpp_name.replace('U', 'I', 1)}>", True,
                                {pt.header} if pt.header else set())
+            if pt.kind == "component" and PREFAB_HINT.search(field_name or ""):
+                # `Man manPrefab` en Unity apunta a un prefab: en UE es el Blueprint a spawnear;
+                # el componente se obtiene del actor creado (FindComponentByClass<UMan>()).
+                return CppType("TSubclassOf<AActor>", "TSubclassOf<AActor>", True, {"GameFramework/Actor.h"},
+                               note=f"{name} usado como prefab -> TSubclassOf<AActor>; tras SpawnActor usar "
+                                    f"FindComponentByClass<{pt.cpp_name}>()")
             return CppType(f"TObjectPtr<{pt.cpp_name}>", f"{pt.cpp_name}*", True, set(), {pt.cpp_name},
                            is_object=True)
         if name in OBJECT_TYPES:
             cls, inc = OBJECT_TYPES[name]
-            if name == "GameObject" and PREFAB_HINT.search(field_name or ""):
-                return CppType("TSubclassOf<AActor>", "TSubclassOf<AActor>", True, {inc},
-                               note="GameObject usado como prefab -> TSubclassOf<AActor> (Blueprint)")
+            is_scene_type = name in ("GameObject", "Transform") or cls.endswith("Component") or cls.startswith("A")
+            if is_scene_type and PREFAB_HINT.search(field_name or ""):
+                return CppType("TSubclassOf<AActor>", "TSubclassOf<AActor>", True, {"GameFramework/Actor.h"},
+                               note=f"{name} usado como prefab -> TSubclassOf<AActor> (Blueprint)")
             note = None
             if name == "Sprite":
                 note = "Sprite -> UPaperSprite (activar plugin Paper2D y cambiar el tipo)"

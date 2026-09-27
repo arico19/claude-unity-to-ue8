@@ -19,9 +19,18 @@ proyecto UE generado por unity2ue y uno o varios scripts de la cola `Unity2UE/sc
 5. La tabla de equivalencias de la skill `unity-api-a-unreal`
    (`.claude/skills/unity-api-a-unreal/reference.md`). Síguela.
 
+   `UUnityCompatLibrary` añade además: `UNITY_TO_UE` (m → cm), `NewGameObject(this, Name, Parent)`,
+   `AddComponent<T>(Actor)`, `InstantiatePrefab` / `InstantiateAs<T>` (prefab → actor → componente),
+   `GetMainCamera(this)` (Camera.main + vista del jugador) y `PlayAnimation(Actor, Clip, bLoop)`.
+
 ## Cómo traducir
 - Traduce cada cuerpo de método; elimina el bloque `// TODO(unity2ue)` y los comentarios con el
   C# una vez traducido. Conserva los comentarios útiles del autor original.
+- Los valores serializados (UPROPERTY, DataAssets) siguen en metros y m/s: multiplícalos por
+  `UNITY_TO_UE` al usarlos como distancia o velocidad. Los `FVector` serializados ya vienen con los
+  ejes de UE pero en metros.
+- Un campo C# de tipo componente usado como prefab (`Man manPrefab`) llega como
+  `TSubclassOf<AActor>`: créalo con `UUnityCompatLibrary::InstantiateAs<UMan>(this, Prefab, Loc, Rot, Parent)`.
 - Unidades y ejes: cualquier literal de posición/distancia en metros se multiplica por 100;
   los vectores Unity `(x, y, z)` pasan a `FVector(z, x, y)`. `Vector3.up` → `FVector::UpVector`,
   `Vector3.forward` → `FVector::ForwardVector`, `Vector3.right` → `FVector::RightVector`.

@@ -148,6 +148,9 @@ class ConversionContext:
             out["ue_class_path"] = n.object_path(bp) + "_C"
         elif info.category in ("animator", "animation"):
             out["ue_path"] = n.object_path(n.asset_path(info.path))
+        elif info.category == "asset":
+            # Instancia de ScriptableObject -> DataAsset (convert/data_assets.py)
+            out["ue_path"] = n.object_path(n.asset_path(info.path, prefix="DA_"))
         elif info.category == "script":
             script = self.scripts.get(guid)
             if script:

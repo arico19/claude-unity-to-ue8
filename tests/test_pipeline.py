@@ -126,3 +126,15 @@ def test_analyze(sample_project):
     assert data["asset_counts"]["script"] == 4
     assert data["component_usage"]["MeshFilter"] == 3
     assert data["api_usage"]["legacy_input"] == 1
+
+
+def test_scriptable_object_assets(converted):
+    """Los .asset de ScriptableObjects del proyecto se convierten en DataAssets con sus valores."""
+    data = _load(converted, "data_assets.json")["data_assets"]
+    rifle = next(d for d in data if d["unity_path"] == "Assets/Data/Rifle.asset")
+    assert rifle["ue_path"] == "/Game/Unity/Data/DA_Rifle"
+    assert rifle["cpp_class"] == "WeaponData"
+    assert rifle["properties"]["damage"]["value"] == 35
+    assert rifle["properties"]["display_name"]["value"] == "Rifle"
+    sound = rifle["properties"]["fire_sound"]["value"]["resolved"]
+    assert sound["ue_path"] == "/Game/Unity/Audio/Shot.Shot"

@@ -114,3 +114,26 @@ public class Boss : BaseUnit {
     # Getter de colección por valor (return {} de una referencia no compila).
     assert "TArray<int32> GetItems() const;" in header
     assert "TArray<int32> UBoss::GetItems() const" in cpp
+
+
+def test_component_typed_prefab_is_blueprint_class():
+    """`Man manPrefab` (componente usado como prefab) -> TSubclassOf<AActor>, también en parámetros."""
+    man = "using UnityEngine; public class Man : MonoBehaviour {}"
+    data = """
+using UnityEngine;
+public class HordeData : ScriptableObject {
+    [SerializeField] private Man _playerManPrefab;
+    [SerializeField] private ParticleSystem _killEffectPrefab;
+    [SerializeField] private Man _leader;
+}"""
+    crowd = """
+using UnityEngine;
+public class Crowd : MonoBehaviour {
+    public void Initialize(Man manPrefab, float delay) {}
+}"""
+    out, _ = _gen({"Assets/Man.cs": man, "Assets/HordeData.cs": data, "Assets/Crowd.cs": crowd})
+    header = out["Assets/HordeData.cs"][1]
+    assert "TSubclassOf<AActor> PlayerManPrefab;" in header
+    assert "TSubclassOf<AActor> KillEffectPrefab;" in header
+    assert "TObjectPtr<UMan> Leader;" in header  # sin pista de prefab: referencia a componente
+    assert "void Initialize(TSubclassOf<AActor> ManPrefab, float Delay);" in out["Assets/Crowd.cs"][1]
