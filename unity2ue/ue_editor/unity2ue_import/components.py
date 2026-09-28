@@ -8,12 +8,16 @@ from __future__ import annotations
 import unreal
 
 from .common import (
+    ASSET_TOOLS,
     LOG,
+    ensure_dir,
     linear_color,
+    load,
     resolve_asset,
     resolve_class,
     resolve_mesh,
     rot,
+    save,
     script_class,
     set_prop,
     vec,
@@ -62,7 +66,7 @@ def component_class(c: dict):
     if t == "Text3D":
         return unreal.TextRenderComponent
     if t == "Sprite":
-        return getattr(unreal, "PaperSpriteComponent", None)
+        return unreal.StaticMeshComponent  # plano texturizado (ver _configure_sprite)
     return None
 
 
@@ -113,6 +117,64 @@ def _materials_by_slot(mesh, part_materials) -> list | None:
         found += mat is not None
         out.append(mat if mat is not None else slot.get_editor_property("material_interface"))
     return out if found else None
+
+
+SPRITE_FOLDER = "/Game/Unity/_Sprites"
+_SPRITE_MATS: dict = {}
+
+
+def _sprite_material(texture, color, item: str):
+    """Material Instance translúcido, sin iluminación y a dos caras para un sprite (textura x color)."""
+    rgba = [round(float(x), 3) for x in (list(color or [1, 1, 1, 1]) + [1.0])[:4]]
+    key = (texture.get_path_name(), tuple(rgba))
+    if key in _SPRITE_MATS:
+        return _SPRITE_MATS[key]
+    ensure_dir(SPRITE_FOLDER)
+    name = f"MI_Sprite_{texture.get_name()}_" + "".join(f"{int(v * 255):02x}" for v in rgba)
+    path = f"{SPRITE_FOLDER}/{name}"
+    mi = load(path)
+    if mi is None:
+        mi = ASSET_TOOLS.create_asset(name, SPRITE_FOLDER, unreal.MaterialInstanceConstant,
+                                      unreal.MaterialInstanceConstantFactoryNew())
+    mel = unreal.MaterialEditingLibrary
+    mel.set_material_instance_parent(mi, load("/Game/Unity/_Master/M_UnityUnlit"))
+    mel.set_material_instance_texture_parameter_value(mi, "BaseColorMap", texture)
+    mel.set_material_instance_vector_parameter_value(mi, "BaseColorTint", unreal.LinearColor(*rgba))
+    overrides = mi.get_editor_property("base_property_overrides")
+    set_prop(overrides, "override_blend_mode", True)
+    set_prop(overrides, "blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    set_prop(overrides, "override_two_sided", True)
+    set_prop(overrides, "two_sided", True)
+    mi.set_editor_property("base_property_overrides", overrides)
+    mel.update_material_instance(mi)
+    save(mi)
+    _SPRITE_MATS[key] = mi
+    return mi
+
+
+def _configure_sprite(comp, c: dict, node: dict, item: str) -> None:
+    """SpriteRenderer de Unity -> plano de /Engine/BasicShapes (1x1 m) en el plano XY de Unity (YZ de UE)."""
+    texture = resolve_asset(c.get("sprite"))
+    if texture is None:
+        LOG.warn(STEP, item, f"Sprite sin textura importada: {c.get('sprite')}")
+        return
+    set_prop(comp, "static_mesh", load("/Engine/BasicShapes/Plane"), STEP, item)
+    width, height = (c.get("size") or [1.0, 1.0])[:2]
+    # El plano es XY (U a lo largo de X, V a lo largo de Y) con normal +Z. Se orienta en el plano
+    # XY de Unity (YZ de UE): X local -> +Y (ancho de la imagen, izquierda a derecha) e Y local -> -Z
+    # (filas de la imagen, de arriba abajo); la normal queda hacia -X, hacia la cámara de Unity.
+    rot = unreal.MathLibrary.make_rot_from_xy(unreal.Vector(0, 1, 0), unreal.Vector(0, 0, -1))
+    set_prop(comp, "relative_rotation", rot)
+    sx = -1.0 if c.get("flip_x") else 1.0
+    sy = -1.0 if c.get("flip_y") else 1.0
+    # UE multiplica escalas padre/hijo eje a eje sin tener en cuenta la rotación del hijo (no hay
+    # cizalla): con el plano girado, la escala no uniforme del nodo (p.ej. 1 x 2.25 x 0.8) caería en
+    # el eje equivocado. Se compensa: X local (ancho) va a Y del padre, Y local (alto) a Z del padre.
+    px, py, pz = (float(v) or 1.0 for v in (node.get("transform") or {}).get("scale", [1.0, 1.0, 1.0]))
+    set_prop(comp, "relative_scale3d", unreal.Vector(width * sx * py / px, height * sy * pz / py, 1.0))
+    set_prop(comp, "override_materials", [_sprite_material(texture, c.get("color"), item)], STEP, item)
+    set_prop(comp, "cast_shadow", False)
+    comp.set_collision_profile_name("NoCollision")
 
 
 def configure(comp, c: dict, node: dict, item: str) -> None:
@@ -217,6 +279,8 @@ def configure(comp, c: dict, node: dict, item: str) -> None:
             set_prop(comp, "auto_activate", bool(c.get("play_on_awake", True)))
         elif t == "Script":
             configure_script(comp, c, item)
+        elif t == "Sprite":
+            _configure_sprite(comp, c, node, item)
         elif t == "Text3D":
             set_prop(comp, "text", unreal.Text(c.get("text", "")), STEP, item)
             set_prop(comp, "world_size", float(c.get("world_size", 36.0)))

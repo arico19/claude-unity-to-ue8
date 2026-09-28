@@ -32,7 +32,30 @@ from unity2ue_import import (  # noqa: E402
 )
 from unity2ue_import.common import LOG, load_json, save_all_dirty  # noqa: E402
 
-ALL_STEPS = ("assets", "anims", "materials", "input", "blueprints", "humanoid", "data", "levels")
+ALL_STEPS = ("assets", "anims", "materials", "input", "blueprints", "humanoid", "data", "levels", "extra")
+
+
+def run_extras() -> None:
+    """Personalizaciones del proyecto: cada módulo de ``unity2ue_import/extra/`` con ``run()``.
+
+    La carpeta ``extra`` se conserva al reconvertir (ue_runner.sync_editor_scripts), así que aquí
+    van los retoques propios de cada proyecto (materiales, ajustes de nivel...), que se reaplican
+    después de cada importación.
+    """
+    import importlib
+    import pkgutil
+
+    from unity2ue_import import extra
+
+    for info in sorted(pkgutil.iter_modules(extra.__path__), key=lambda m: m.name):
+        try:
+            module = importlib.import_module(f"unity2ue_import.extra.{info.name}")
+            importlib.reload(module)
+            if hasattr(module, "run"):
+                module.run()
+                LOG.ok("extra", info.name, "aplicado")
+        except Exception:  # noqa: BLE001
+            LOG.exception("extra", info.name)
 
 
 def main(steps: tuple[str, ...] | None = None) -> str:
@@ -68,6 +91,9 @@ def main(steps: tuple[str, ...] | None = None) -> str:
         save_all_dirty()
     if "levels" in steps:
         levels.run(load_json("levels.json"))
+        save_all_dirty()
+    if "extra" in steps:
+        run_extras()
         save_all_dirty()
     path = LOG.save()
     summary = {}

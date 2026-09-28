@@ -277,10 +277,13 @@ def generate_project(out_dir: Path, cfg: ConversionConfig, *, settings: dict[str
         _write(cfg_dir / "DefaultGameplayTags.ini", gameplay_tags_ini(tl["tags"]))
 
     # Scripts Python del editor (UE añade Content/Python al sys.path automáticamente).
+    # extra/ guarda las personalizaciones del proyecto: se conserva al reconvertir.
     py_dst = out_dir / "Content" / "Python" / "unity2ue_import"
-    if py_dst.exists():
-        shutil.rmtree(py_dst)
-    shutil.copytree(EDITOR_SCRIPTS, py_dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(EDITOR_SCRIPTS, py_dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "extra"),
+                    dirs_exist_ok=True)
+    (py_dst / "extra").mkdir(exist_ok=True)
+    if not (py_dst / "extra" / "__init__.py").exists():
+        shutil.copy2(EDITOR_SCRIPTS / "extra" / "__init__.py", py_dst / "extra" / "__init__.py")
 
     _write(out_dir / ".gitignore", "Binaries/\nDerivedDataCache/\nIntermediate/\nSaved/\n.vs/\n*.sln\n")
     return up

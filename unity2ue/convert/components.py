@@ -82,10 +82,54 @@ def skinned_mesh_renderer(obj: UnityObject, ctx: ConversionContext, src: str) ->
     }
 
 
+def _image_size(path) -> tuple[int, int] | None:
+    """Ancho y alto de un PNG o JPEG leyendo sólo la cabecera."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(32)
+            if head[:8] == bytes([137, 80, 78, 71, 13, 10, 26, 10]):  # PNG
+                return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+            if head[:2] == bytes([0xFF, 0xD8]):  # JPEG
+                fh.seek(2)
+                while True:
+                    marker = fh.read(2)
+                    if len(marker) < 2 or marker[0] != 0xFF:
+                        return None
+                    length = int.from_bytes(fh.read(2), "big")
+                    if marker[1] in (0xC0, 0xC1, 0xC2):
+                        data = fh.read(5)
+                        return int.from_bytes(data[3:5], "big"), int.from_bytes(data[1:3], "big")
+                    fh.seek(length - 2, 1)
+    except OSError:
+        return None
+    return None
+
+
+def _sprite_size(ctx: ConversionContext, ref: Any) -> list[float] | None:
+    """Tamaño en metros de un sprite de textura completa (spriteMode Single): píxeles / PPU."""
+    info = ctx.project.guids.get(ref_guid(ref) or "")
+    if info is None:
+        return None
+    imp = info.importer
+    if int(imp.get("spriteMode", 1) or 1) != 1:
+        return None  # hoja de sprites: el rectángulo de cada sprite no se calcula aquí
+    wh = _image_size(info.abs_path)
+    ppu = float(imp.get("spritePixelsToUnits", 100) or 100)
+    return [wh[0] / ppu, wh[1] / ppu] if wh else None
+
+
 def sprite_renderer(obj: UnityObject, ctx: ConversionContext, src: str) -> dict[str, Any]:
-    ctx.manual(src, "SpriteRenderer -> PaperSpriteComponent: requiere plugin Paper2D y crear los PaperSprite.")
+    # SpriteRenderer -> plano texturizado con material translúcido (sin depender de Paper2D).
+    # m_Size (metros) es el tamaño del sprite en modo Simple; en Sliced/Tiled, el tamaño dibujado.
+    size = obj.get("m_Size") or {}
+    dims = [float(size.get("x", 1.0) or 1.0), float(size.get("y", 1.0) or 1.0)]
+    if int(obj.get("m_DrawMode", 0) or 0) == 0:
+        # Modo Simple: Unity ignora m_Size (puede quedar un valor viejo) y dibuja el sprite a
+        # píxeles / PixelsPerUnit.
+        dims = _sprite_size(ctx, obj.get("m_Sprite")) or dims
     return {
         "type": "Sprite",
+        "size": dims,
         "sprite": ctx.asset_ref(obj.get("m_Sprite"), src),
         "color": color_to_linear(obj.get("m_Color")),
         "flip_x": _b(obj.get("m_FlipX")),

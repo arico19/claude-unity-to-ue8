@@ -167,3 +167,33 @@ def test_reconvert_keeps_unchanged_files(tmp_path, sample_project):
         os.utime(f, (1_000_000_000, 1_000_000_000))
     convert_project(sample_project, tmp_path, cfg, log=lambda _m: None)
     assert all(f.stat().st_mtime == 1_000_000_000 for f in files)
+
+
+def test_reconvert_keeps_project_extras(tmp_path, sample_project):
+    """Las personalizaciones de unity2ue_import/extra/ sobreviven a una reconversión."""
+    from unity2ue.config import ConversionConfig
+    from unity2ue.pipeline import convert_project
+
+    cfg = ConversionConfig(project_name="Sample Game")
+    result = convert_project(sample_project, tmp_path, cfg, log=lambda _m: None)
+    custom = result.out_dir / "Content/Python/unity2ue_import/extra/mis_retoques.py"
+    custom.write_text("def run():\n    pass\n", encoding="utf-8")
+    convert_project(sample_project, tmp_path, cfg, log=lambda _m: None)
+    assert custom.exists()
+
+
+def test_image_size_reads_png_header(tmp_path):
+    """Tamaño de sprite en modo Simple = píxeles de la imagen / PixelsPerUnit (no m_Size)."""
+    import struct
+    import zlib
+
+    from unity2ue.convert.components import _image_size
+
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data))
+
+    png = (bytes([137, 80, 78, 71, 13, 10, 26, 10]) + chunk(b"IHDR", struct.pack(">IIBBBBB", 300, 150, 8, 6, 0, 0, 0))
+           + chunk(b"IEND", b""))
+    path = tmp_path / "s.png"
+    path.write_bytes(png)
+    assert _image_size(path) == (300, 150)
