@@ -21,6 +21,13 @@ SDS = None
 LIB = unreal.SubobjectDataBlueprintFunctionLibrary
 
 _SKELETAL_USED: set[str] = set()  # SkeletalMesh ya añadidas en el Blueprint en construcción
+_BP_ROOT: list[dict] = [{}]  # nodo raíz del prefab en construcción
+
+
+def _walk(node: dict):
+    yield node
+    for ch in node.get("children", []):
+        yield from _walk(ch)
 
 PHYSICS_ROOT_PRIORITY = ("BoxCollision", "SphereCollision", "CapsuleCollision", "StaticMesh", "SkeletalMesh")
 
@@ -118,6 +125,12 @@ def _add_components(bp, parent_handle, node: dict, used: set[str], item: str, sk
                 continue
             if mesh is not None:
                 _SKELETAL_USED.add(mesh.get_path_name())
+                # Materiales de TODAS las partes (cuerpo, cabeza, manos) para repartirlos por ranura.
+                guid = (c.get("mesh") or {}).get("guid")
+                c = dict(c, part_materials=[m for n in _walk(_BP_ROOT[0]) for pc in n.get("components", [])
+                                            if pc.get("type") == "SkeletalMesh"
+                                            and (pc.get("mesh") or {}).get("guid") == guid
+                                            for m in pc.get("materials") or [] if m])
         cls = comps.component_class(c)
         if cls is None:
             if t == "Script":
@@ -187,6 +200,7 @@ def build_blueprint(package_path: str, root: dict, parent_class=None, item: str 
     folder, name = package_path.rsplit("/", 1)
     ensure_dir(folder)
     _SKELETAL_USED.clear()
+    _BP_ROOT[0] = root
     bp = _reuse_existing(package_path, parent_class or unreal.Actor, item)
     if bp is None:
         factory = unreal.BlueprintFactory()

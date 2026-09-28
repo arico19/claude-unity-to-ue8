@@ -82,6 +82,39 @@ def _collision(comp, c: dict) -> None:
         set_prop(comp, "generate_overlap_events", True)
 
 
+def _materials_by_slot(mesh, part_materials) -> list | None:
+    """Reparte los materiales de Unity en las ranuras de una SkeletalMesh fusionada por su nombre.
+
+    UE une las mallas con skin de un FBX (cuerpo, cabeza, manos...) en una sola con una ranura por
+    material del FBX; en Unity cada parte tenía su material. Se empareja ranura <-> material por nombre.
+    """
+    if not part_materials:
+        return None
+    try:
+        slots = list(mesh.get_editor_property("materials"))
+    except Exception:  # noqa: BLE001
+        return None
+    if len(slots) < 2:
+        return None
+
+    def norm(s) -> str:
+        return "".join(ch for ch in str(s).lower() if ch.isalnum())
+
+    by_name = {}
+    for ref in part_materials:
+        path = ref.get("unity_path") or ""
+        by_name.setdefault(norm(path.rsplit("/", 1)[-1].rsplit(".", 1)[0]), ref)
+    out, found = [], 0
+    for slot in slots:
+        names = {norm(slot.get_editor_property("material_slot_name")),
+                 norm(slot.get_editor_property("imported_material_slot_name"))}
+        ref = next((by_name[n] for n in names if n in by_name), None)
+        mat = resolve_asset(ref) if ref else None
+        found += mat is not None
+        out.append(mat if mat is not None else slot.get_editor_property("material_interface"))
+    return out if found else None
+
+
 def configure(comp, c: dict, node: dict, item: str) -> None:
     """Aplica las propiedades del componente convertido ``c`` al componente UE ``comp``."""
     t = c.get("type")
@@ -117,8 +150,9 @@ def configure(comp, c: dict, node: dict, item: str) -> None:
             if mesh is not None:
                 if not set_prop(comp, "skeletal_mesh_asset", mesh):
                     set_prop(comp, "skeletal_mesh", mesh, STEP, item)
-            mats = [resolve_asset(m) for m in c.get("materials") or []]
-            if any(mats) and all(mats):
+            by_slot = _materials_by_slot(mesh, c.get("part_materials")) if mesh is not None else None
+            mats = by_slot or [resolve_asset(m) for m in c.get("materials") or []]
+            if any(mats) and (by_slot or all(mats)):
                 set_prop(comp, "override_materials", mats, STEP, item)
         elif t in LIGHT_CLASSES:
             # FColor está en sRGB, igual que los colores serializados por Unity.

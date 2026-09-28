@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
+import os
+import struct
+import zlib
+
 import unreal
 
-from .common import LOG, content_root, create_or_load, ensure_dir, linear_color, load, save, set_prop
+from .common import (
+    ASSET_TOOLS,
+    LOG,
+    content_root,
+    create_or_load,
+    data_dir,
+    ensure_dir,
+    linear_color,
+    load,
+    save,
+    set_prop,
+)
 
 STEP = "materials"
 MEL = unreal.MaterialEditingLibrary
@@ -13,8 +28,51 @@ WHITE = "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"
 FLAT_NORMAL = "/Engine/EngineMaterials/DefaultNormal.DefaultNormal"
 
 
+# Versión de los materiales maestros: si cambia su construcción, se rehacen al reimportar.
+MASTER_VERSION = "4"
+
+
 def master_folder() -> str:
     return f"{content_root()}/_Master"
+
+
+def _png_white(path: str) -> None:
+    """PNG 4x4 blanco (RGBA) sin dependencias."""
+    raw = b"".join(bytes([0]) + bytes([255]) * 16 for _ in range(4))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    signature = bytes([137, 80, 78, 71, 13, 10, 26, 10])
+    png = (signature + chunk(b"IHDR", struct.pack(">IIBBBBB", 4, 4, 8, 6, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+    with open(path, "wb") as fh:
+        fh.write(png)
+
+
+def _linear_white() -> str:
+    """Textura blanca en espacio lineal: valor por defecto de los mapas de datos (metálico, AO).
+
+    Un sampler "Linear Color" con una textura sRGB (como WhiteSquareTexture del motor) hace que el
+    material maestro no compile en SM5 y UE usa el material por defecto (todo gris cuadriculado).
+    """
+    path = f"{master_folder()}/T_LinearWhite"
+    tex = load(path)
+    if tex is None:
+        src = os.path.join(data_dir(), "T_LinearWhite.png")
+        _png_white(src)
+        task = unreal.AssetImportTask()
+        for k, v in (("filename", src), ("destination_path", master_folder()), ("destination_name", "T_LinearWhite"),
+                     ("automated", True), ("replace_existing", True), ("save", True)):
+            task.set_editor_property(k, v)
+        ASSET_TOOLS.import_asset_tasks([task])
+        tex = load(path)
+    if tex is not None:
+        set_prop(tex, "srgb", False)
+        # Compresión normal sin sRGB = sampler "Linear Color" (como las texturas de datos importadas).
+        set_prop(tex, "compression_settings", unreal.TextureCompressionSettings.TC_DEFAULT)
+        save(tex)
+    return f"{path}.T_LinearWhite"
 
 
 def _expr(mat, cls, x: int, y: int):
@@ -74,8 +132,12 @@ def _uv_node(mat):
 def _build_master(name: str, unlit: bool):
     mat, created = create_or_load(name, master_folder(), unreal.Material, unreal.MaterialFactoryNew())
     if not created:
-        LOG.ok(STEP, name, "ya existe (reutilizado)")
-        return mat
+        if unreal.EditorAssetLibrary.get_metadata_tag(mat, "unity2ue_version") == MASTER_VERSION:
+            LOG.ok(STEP, name, "ya existe (reutilizado)")
+            return mat
+        MEL.delete_all_material_expressions(mat)  # versión anterior: se reconstruye en el mismo asset
+        LOG.ok(STEP, name, f"se reconstruye (versión {MASTER_VERSION})")
+    linear_white = _linear_white()
     S = unreal.MaterialSamplerType
     uv = _uv_node(mat)
     base_tex = _texture(mat, "BaseColorMap", WHITE, S.SAMPLERTYPE_COLOR, -900, -400, uv)
@@ -109,7 +171,7 @@ def _build_master(name: str, unlit: bool):
         MEL.connect_material_property(nlerp, "", unreal.MaterialProperty.MP_NORMAL)
 
         # Metallic = Metallic * MS.R ; Roughness = 1 - Smoothness * MS.A
-        ms_tex = _texture(mat, "MetallicSmoothnessMap", WHITE, S.SAMPLERTYPE_LINEAR_COLOR, -900, 350, uv)
+        ms_tex = _texture(mat, "MetallicSmoothnessMap", linear_white, S.SAMPLERTYPE_LINEAR_COLOR, -900, 350, uv)
         metallic = _mul(mat, _scalar(mat, "Metallic", 0.0, -700, 350), "", ms_tex, "R", -400, 350)
         smooth = _mul(mat, _scalar(mat, "Smoothness", 0.5, -700, 500), "", ms_tex, "A", -400, 500)
         rough = _expr(mat, unreal.MaterialExpressionOneMinus, -250, 500)
@@ -118,7 +180,7 @@ def _build_master(name: str, unlit: bool):
         MEL.connect_material_property(rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
 
         # AO = lerp(1, Occlusion.G, OcclusionStrength)
-        ao_tex = _texture(mat, "OcclusionMap", WHITE, S.SAMPLERTYPE_LINEAR_COLOR, -900, 650, uv)
+        ao_tex = _texture(mat, "OcclusionMap", linear_white, S.SAMPLERTYPE_LINEAR_COLOR, -900, 650, uv)
         one = _expr(mat, unreal.MaterialExpressionConstant, -700, 650)
         one.set_editor_property("r", 1.0)
         ao_strength = _scalar(mat, "OcclusionStrength", 1.0, -700, 750)
@@ -131,7 +193,12 @@ def _build_master(name: str, unlit: bool):
     MEL.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
     MEL.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY_MASK)
     MEL.layout_material_expressions(mat)
+    # Usos: sin "Used with Skeletal Mesh" UE pinta los personajes con el material por defecto.
+    for usage in ("used_with_skeletal_mesh", "used_with_morph_targets", "used_with_instanced_static_meshes",
+                  "used_with_niagara_sprites", "used_with_niagara_meshes", "used_with_particle_sprites"):
+        set_prop(mat, usage, True)
     MEL.recompile_material(mat)
+    unreal.EditorAssetLibrary.set_metadata_tag(mat, "unity2ue_version", MASTER_VERSION)
     save(mat)
     LOG.ok(STEP, name, "material maestro creado")
     return mat
