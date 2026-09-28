@@ -172,6 +172,18 @@ class HierarchyConverter:
                 f"{self.path}:{name}",
                 f"{len(overrides)} overrides de prefab en objetos internos registrados en el JSON (aplicación parcial).",
             )
+        # Componentes añadidos en la instancia/variante (p.ej. un script que el prefab base no tiene).
+        added: list[dict[str, Any]] = []
+        for entry in mod.get("m_AddedComponents") or []:
+            obj = self.doc.get(ref_file_id((entry or {}).get("addedObject")))
+            target = ref_file_id((entry or {}).get("targetCorrespondingSourceObject"))
+            if obj is None:
+                continue
+            if root_go_id is not None and target != root_go_id:
+                self.ctx.warn(f"{self.path}:{name}", "Componente añadido a un objeto interno del prefab: "
+                                                     "se añade a la raíz del actor")
+            converted = convert_component(obj, self.ctx, f"{self.path}:{name}")
+            added.extend(converted if isinstance(converted, list) else [converted] if converted else [])
         return {
             "id": str(inst.file_id),
             "name": name,
@@ -188,6 +200,7 @@ class HierarchyConverter:
                 "ue_class_path": (ref or {}).get("ue_class_path"),
                 "overrides": overrides,
                 "removed_components": [ref_file_id(r) for r in mod.get("m_RemovedComponents") or []],
+                "added_components": added,
             },
         }
 

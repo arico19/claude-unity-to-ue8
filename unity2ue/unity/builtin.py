@@ -51,4 +51,5 @@ KNOWN_PACKAGE_SCRIPTS = {
     "76c392e42b5098c458856cdf6ecaaaa1": "UnityEngine.EventSystems.EventSystem",
     "4f231c4fb786f3946a6b90b886c48677": "UnityEngine.EventSystems.StandaloneInputModule",
     "f4688fdb7df04437aeb418b961361dc5": "TMPro.TextMeshProUGUI",
+    "9541d86e2fd84c1d9990edf0852d74ab": "TMPro.TextMeshPro",  # texto 3D (no UI)
 }

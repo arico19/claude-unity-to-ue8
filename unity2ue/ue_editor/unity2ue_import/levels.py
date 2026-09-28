@@ -59,6 +59,34 @@ def _generic_actor_class():
     return cls or unreal.StaticMeshActor  # sin módulo compilado: StaticMeshActor vacío como "grupo"
 
 
+def _snake(field: str) -> str:
+    """Campo de Unity -> nombre Python de la UPROPERTY (como naming.cpp_property_name + to_snake)."""
+    name = field.lstrip("_")
+    if name.startswith("m_"):
+        name = name[2:]
+    out = []
+    for i, ch in enumerate(name):
+        if ch.isupper() and i and (not name[i - 1].isupper() or (i + 1 < len(name) and name[i + 1].islower())):
+            out.append("_")
+        out.append(ch.lower())
+    return "".join(out).replace("__", "_")
+
+
+def _scalar(value):
+    if isinstance(value, (int, float, bool)):
+        return value
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        try:
+            return float(text)
+        except ValueError:
+            return text
+
+
 class LevelBuilder:
     def __init__(self, level: dict) -> None:
         self.level = level
@@ -67,6 +95,7 @@ class LevelBuilder:
         self.pending_scripts: list[tuple[object, dict, str]] = []
         self.generated_folder = f"{content_root()}/Maps/{self.name}_Generated"
         self._scale_override = None
+        self._camera_done = False
 
     # ------------------------------------------------------------ componentes extra
     def _add_instance_component(self, actor, cls, c: dict, node: dict, item: str):
@@ -97,6 +126,39 @@ class LevelBuilder:
             raise RuntimeError(f"No se pudo generar {cls}")
         return actor
 
+    def _apply_script_overrides(self, actor, overrides: list[dict], item: str) -> None:
+        """Valores de scripts sobrescritos en la instancia del prefab (p.ej. qué prefab suelta un cubo).
+
+        Unity guarda el override por nombre de campo; se prueba en los componentes de script del actor
+        con el nombre de propiedad de UE correspondiente (``gates1Prefab`` -> ``gates1_prefab``).
+        """
+        scripts = [c for c in actor.get_components_by_class(unreal.ActorComponent)
+                   if not c.get_class().get_path_name().startswith(("/Script/Engine", "/Script/Niagara"))]
+        if not scripts:
+            return
+        for o in overrides:
+            prop = str(o.get("property") or "")
+            if not prop or "." in prop or prop.startswith("m_"):
+                continue  # transform, arrays y propiedades internas de Unity
+            if o.get("object_reference"):
+                ref = o["object_reference"]
+                value = comps._resolve_value({"__type": "ObjectRef", "guid": ref.get("guid"),
+                                              "fileID": ref.get("fileID"), "resolved": ref}, None)
+            else:
+                value = _scalar(o.get("value"))
+            if value is comps._SKIP or value is None:
+                continue
+            name = _snake(prop)
+            applied = False
+            for comp in scripts:
+                try:
+                    comp.set_editor_property(name, value)
+                    applied = True
+                except Exception:  # noqa: BLE001
+                    continue
+            if applied:
+                LOG.add(STEP, item, "info", f"Override de la instancia aplicado: {prop}")
+
     def _node_actor(self, node: dict, item: str):
         comps_data = [c for c in node.get("components", []) if c.get("type") not in IGNORED]
         has_rb = any(c.get("type") == "Rigidbody" for c in node.get("components", []))
@@ -105,7 +167,16 @@ class LevelBuilder:
             if cls is None:
                 LOG.warn(STEP, item, f"Blueprint de prefab no encontrado: {node['prefab'].get('unity_path')}")
                 return self._spawn(_generic_actor_class(), node), []
-            return self._spawn(cls, node), []
+            actor = self._spawn(cls, node)
+            for c in node["prefab"].get("added_components") or []:
+                ccls = comps.component_class(c)
+                if ccls is not None:
+                    try:
+                        self._add_instance_component(actor, ccls, c, node, item)
+                    except Exception:  # noqa: BLE001
+                        LOG.exception(STEP, f"{item}: componente añadido")
+            self._apply_script_overrides(actor, node["prefab"].get("overrides") or [], item)
+            return actor, []
         if has_rb:
             bp_path = f"{self.generated_folder}/BP_{node['name']}_{node['id']}".replace(" ", "_")
             root = dict(node)
@@ -122,6 +193,10 @@ class LevelBuilder:
                 ptype = "StaticMesh" if comps._skeletal_as_static(primary) else primary["type"]
                 cls, comp_prop = PRIMARY_ACTORS[ptype]
                 actor = self._spawn(cls, node)
+                if ptype == "Camera" and not self._camera_done:
+                    # Como Camera.main en Unity: la primera cámara de la escena es la vista del jugador.
+                    set_prop(actor, "auto_activate_for_player", unreal.AutoReceiveInput.PLAYER0)
+                    self._camera_done = True
                 comp = actor.get_editor_property(comp_prop)
                 comps.configure(comp, primary, node, item)
                 extra = (primary.get("mesh") or {}).get("extra_scale")

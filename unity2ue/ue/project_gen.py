@@ -143,6 +143,8 @@ def default_engine_ini(cfg: ConversionConfig, default_map: str | None, gravity_z
     ]
     if default_map:
         lines += [f"GameDefaultMap={default_map}", f"EditorStartupMap={default_map}"]
+    # Sin pawn por defecto (Unity no crea ninguno): ver UnityCompat/UnityGameMode.h
+    lines.append(f"GlobalDefaultGameMode=/Script/{cfg.module_name}.UnityGameMode")
     lines += [
         "",
         "[/Script/Engine.RendererSettings]",

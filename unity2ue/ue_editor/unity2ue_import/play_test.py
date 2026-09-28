@@ -25,6 +25,12 @@ from unity2ue_import.common import data_dir, settings  # noqa: E402
 
 OUT = os.path.join(data_dir(), "play")
 SHOTS = [float(s) for s in os.environ.get("UNITY2UE_PLAY_SHOTS", "3,8,15").split(",")]
+# Comandos de consola a lo largo de la partida: "segundo:comando;segundo:comando"
+# (p.ej. "1:unity2ue.AutoMove -1;3:unity2ue.AutoFire 1" en juegos con ganchos de prueba).
+CMDS = sorted(
+    (float(t), c.strip()) for t, _, c in
+    (part.partition(":") for part in os.environ.get("UNITY2UE_PLAY_CMDS", "").split(";") if ":" in part)
+)
 
 
 class PlayTest:
@@ -36,6 +42,7 @@ class PlayTest:
         self.state = "load"
         self.t0 = 0.0
         self.shots = list(SHOTS)
+        self.cmds = list(CMDS)
         self.done: list[str] = []
         self.frames = 0
         unreal.EditorPythonScripting.set_keep_python_script_alive(True)
@@ -66,6 +73,12 @@ class PlayTest:
                 self.state, self.t0 = "playing", time.time()
             elif self.state == "playing":
                 elapsed = time.time() - self.t0
+                while self.cmds and elapsed >= self.cmds[0][0]:
+                    _, cmd = self.cmds.pop(0)
+                    world = self.ues.get_game_world()
+                    if world:
+                        unreal.SystemLibrary.execute_console_command(world, cmd)
+                        unreal.log(f"[unity2ue][play] {elapsed:.1f}s: {cmd}")
                 if self.shots and elapsed >= self.shots[0]:
                     sec = self.shots.pop(0)
                     world = self.ues.get_game_world()

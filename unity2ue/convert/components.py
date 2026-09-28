@@ -393,6 +393,24 @@ def _serialize_value(value: Any, ctx: ConversionContext | None = None, src: str 
     return value
 
 
+# TextMeshPro 3D: alineación horizontal (bits bajos de m_HorizontalAlignment / m_textAlignment)
+_TMP_ALIGN = {1: "left", 2: "center", 4: "right", 8: "left", 16: "center", 32: "center"}
+
+
+def text_mesh_pro_3d(props: dict[str, Any]) -> dict[str, Any]:
+    """TextMeshPro (texto en el mundo, no UI) -> TextRenderComponent de UE."""
+    color = props.get("m_fontColor") or {}
+    align = props.get("m_HorizontalAlignment") or (props.get("m_textAlignment") or 0) & 0xFF
+    return {
+        "type": "Text3D",
+        "text": str(props.get("m_text") or ""),
+        # En TMP 3D, fontSize 10 ≈ 1 unidad de Unity (1 m) de alto.
+        "world_size": float(props.get("m_fontSize") or 36) * 10.0,
+        "color": color.get("value") if isinstance(color, dict) else None,
+        "alignment": _TMP_ALIGN.get(int(align or 2), "center"),
+    }
+
+
 def mono_behaviour(obj: UnityObject, ctx: ConversionContext, src: str) -> dict[str, Any] | None:
     script_ref = obj.get("m_Script")
     guid = ref_guid(script_ref)
@@ -401,6 +419,8 @@ def mono_behaviour(obj: UnityObject, ctx: ConversionContext, src: str) -> dict[s
     if script is None:
         info = ctx.project.guids.get(guid)
         known = KNOWN_PACKAGE_SCRIPTS.get(guid or "")
+        if known == "TMPro.TextMeshPro":
+            return text_mesh_pro_3d(props)
         if known:
             if known.startswith(("UnityEngine.UI", "TMPro")):
                 ctx.manual(src, f"{known}: recrear en el Widget Blueprint (UMG) correspondiente.")

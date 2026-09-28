@@ -196,8 +196,13 @@ def build_blueprint(package_path: str, root: dict, parent_class=None, item: str 
         LOG.error(STEP, item, f"No se pudo crear {package_path}")
         return None
     if parent_class is not None:
-        # Variante: hereda del Blueprint base. Los overrides de la variante quedan en el JSON.
-        LOG.warn(STEP, item, "Variante de prefab: revisar overrides respecto al Blueprint base")
+        # Variante: hereda del Blueprint base y añade sus componentes nuevos (p.ej. un script).
+        added = ((root.get("prefab") or {}).get("added_components")) or []
+        if added:
+            handles = _sds().k2_gather_subobject_data_for_blueprint(bp)
+            _add_components(bp, handles[0], {"components": added}, {"DefaultSceneRoot"}, item, set())
+        LOG.warn(STEP, item, "Variante de prefab: overrides de valores respecto al Blueprint base sin aplicar"
+                 + (f"; {len(added)} componentes añadidos" if added else ""))
         unreal.BlueprintEditorLibrary.compile_blueprint(bp)
         save(bp)
         return bp

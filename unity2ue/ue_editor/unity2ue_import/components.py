@@ -59,6 +59,8 @@ def component_class(c: dict):
         return getattr(unreal, "NiagaraComponent", None)
     if t == "Script":
         return script_class(c.get("cpp_class"))
+    if t == "Text3D":
+        return unreal.TextRenderComponent
     if t == "Sprite":
         return getattr(unreal, "PaperSpriteComponent", None)
     return None
@@ -181,6 +183,18 @@ def configure(comp, c: dict, node: dict, item: str) -> None:
             set_prop(comp, "auto_activate", bool(c.get("play_on_awake", True)))
         elif t == "Script":
             configure_script(comp, c, item)
+        elif t == "Text3D":
+            set_prop(comp, "text", unreal.Text(c.get("text", "")), STEP, item)
+            set_prop(comp, "world_size", float(c.get("world_size", 36.0)))
+            align = {"left": unreal.HorizTextAligment.EHTA_LEFT, "right": unreal.HorizTextAligment.EHTA_RIGHT}.get(
+                c.get("alignment"), unreal.HorizTextAligment.EHTA_CENTER)
+            set_prop(comp, "horizontal_alignment", align)
+            set_prop(comp, "vertical_alignment", unreal.VerticalTextAligment.EVRTA_TEXT_CENTER)
+            if c.get("color"):
+                r, g, b = (int(round(max(0.0, min(1.0, float(x))) ** (1 / 2.2) * 255)) for x in c["color"][:3])
+                set_prop(comp, "text_render_color", unreal.Color(r=r, g=g, b=b, a=255))
+            # El texto de TMP se lee mirando hacia +Z de Unity (+X de UE); TextRender se lee desde +X.
+            set_prop(comp, "relative_rotation", unreal.Rotator(roll=0, pitch=0, yaw=180))
         if c.get("enabled") is False:
             set_prop(comp, "auto_activate", False)
     except Exception:  # noqa: BLE001
