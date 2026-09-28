@@ -30,6 +30,7 @@ from .convert.cpp_gen import CppGenerator, build_plans
 from .convert.csharp import CSFile, parse_csharp_file
 from .convert.data_assets import convert_data_asset
 from .convert.hierarchy import convert_prefab, convert_scene, iter_nodes
+from .convert.humanoid import retarget_jobs
 from .convert.materials import convert_material
 from .naming import sanitize
 from .report import write_report
@@ -191,7 +192,10 @@ class Converter:
                 prefabs[a.path] = data
         order = _topo_sort(prefabs)
         _json(out / "Unity2UE" / "blueprints.json", {"order": order, "prefabs": [prefabs[p] for p in order]})
-        return {"prefabs": len(prefabs)}
+        jobs = self._safe(lambda: retarget_jobs(self.ctx, list(prefabs.values())), "humanoid") or []
+        if jobs:
+            _json(out / "Unity2UE" / "humanoid.json", {"jobs": jobs})
+        return {"prefabs": len(prefabs), "humanoid_retargets": sum(len(j["states"]) for j in jobs)}
 
     def phase_scenes(self, out: Path) -> dict[str, Any]:
         scenes = self._assets("scene")

@@ -24,6 +24,7 @@ from unity2ue_import import (  # noqa: E402
     anim_clips,
     blueprints,
     data_assets,
+    humanoid_retarget,
     import_assets,
     input_actions,
     levels,
@@ -31,7 +32,7 @@ from unity2ue_import import (  # noqa: E402
 )
 from unity2ue_import.common import LOG, load_json, save_all_dirty  # noqa: E402
 
-ALL_STEPS = ("assets", "anims", "materials", "input", "blueprints", "data", "levels")
+ALL_STEPS = ("assets", "anims", "materials", "input", "blueprints", "humanoid", "data", "levels")
 
 
 def main(steps: tuple[str, ...] | None = None) -> str:
@@ -58,6 +59,9 @@ def main(steps: tuple[str, ...] | None = None) -> str:
             pass
     if "blueprints" in steps:
         blueprints.run(load_json("blueprints.json"))
+        save_all_dirty()
+    if "humanoid" in steps:
+        humanoid_retarget.run(load_json("humanoid.json"))
         save_all_dirty()
     if "data" in steps:
         data_assets.run(load_json("data_assets.json"))
