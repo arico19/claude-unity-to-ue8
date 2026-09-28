@@ -14,11 +14,13 @@ from __future__ import annotations
 import unreal
 
 from . import components as comps
-from .common import ASSET_TOOLS, LOG, ensure_dir, load, resolve_class, rot_from_quat, save, set_prop, vec
+from .common import ASSET_TOOLS, LOG, ensure_dir, load, resolve_class, resolve_mesh, rot_from_quat, save, set_prop, vec
 
 STEP = "blueprints"
 SDS = None
 LIB = unreal.SubobjectDataBlueprintFunctionLibrary
+
+_SKELETAL_USED: set[str] = set()  # SkeletalMesh ya añadidas en el Blueprint en construcción
 
 PHYSICS_ROOT_PRIORITY = ("BoxCollision", "SphereCollision", "CapsuleCollision", "StaticMesh", "SkeletalMesh")
 
@@ -107,6 +109,15 @@ def _add_components(bp, parent_handle, node: dict, used: set[str], item: str, sk
             if t == "UnresolvedScript":
                 LOG.warn(STEP, item, f"Script no resuelto: {c.get('unity_path') or c.get('guid')}")
             continue
+        if t == "SkeletalMesh":
+            # UE importa un FBX con varias mallas con skin como UNA SkeletalMesh (cuerpo, cabeza,
+            # manos...): si otra parte ya la usa en este Blueprint, no se duplica el personaje.
+            mesh = resolve_mesh(c.get("mesh"), skeletal=True)
+            if mesh is not None and mesh.get_path_name() in _SKELETAL_USED:
+                LOG.add(STEP, item, "info", f"Parte de la malla {mesh.get_name()} ya añadida: se omite")
+                continue
+            if mesh is not None:
+                _SKELETAL_USED.add(mesh.get_path_name())
         cls = comps.component_class(c)
         if cls is None:
             if t == "Script":
@@ -175,6 +186,7 @@ def _reuse_existing(package_path: str, parent_class, item: str):
 def build_blueprint(package_path: str, root: dict, parent_class=None, item: str = "") -> object | None:
     folder, name = package_path.rsplit("/", 1)
     ensure_dir(folder)
+    _SKELETAL_USED.clear()
     bp = _reuse_existing(package_path, parent_class or unreal.Actor, item)
     if bp is None:
         factory = unreal.BlueprintFactory()

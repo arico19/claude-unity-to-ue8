@@ -7,7 +7,17 @@ from __future__ import annotations
 
 import unreal
 
-from .common import LOG, linear_color, resolve_asset, resolve_class, resolve_mesh, rot, script_class, set_prop, vec
+from .common import (
+    LOG,
+    linear_color,
+    resolve_asset,
+    resolve_class,
+    resolve_mesh,
+    rot,
+    script_class,
+    set_prop,
+    vec,
+)
 
 STEP = "components"
 

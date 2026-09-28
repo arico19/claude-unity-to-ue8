@@ -43,6 +43,28 @@ def _is_unity_project(path: Path) -> bool:
     return (path / "Assets").is_dir() and (path / "ProjectSettings").is_dir()
 
 
+def _slow_drive(path: str) -> str | None:
+    """Devuelve el tipo de disco si el destino está en un disco USB o mecánico (compilar ahí es muy lento:
+    el PCH de UE pesa ~2,5 GB y se lee a trozos por fallos de página)."""
+    drive = Path(path).drive.rstrip(":")
+    if not drive:
+        return None
+    ps = (f"$d = Get-Partition -DriveLetter {drive} | Get-Disk; "
+          f"$m = (Get-PhysicalDisk | Where-Object DeviceId -eq $d.Number).MediaType; "
+          "Write-Output \"$($d.BusType)|$m\"")
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+                             timeout=15, creationflags=NO_WINDOW).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    bus, _, media = out.partition("|")
+    if bus.upper() == "USB":
+        return "disco USB"
+    if media.upper() == "HDD":
+        return "disco mecánico (HDD)"
+    return None
+
+
 def _default_name(unity_path: str) -> str:
     name = re.sub(r"[^A-Za-z0-9]", " ", Path(unity_path).name)
     name = to_pascal(name.strip()) or "ConvertedProject"
@@ -200,6 +222,12 @@ class App(tk.Tk):
             messagebox.showerror("Unity → Unreal", error)
             return
         dest = Path(self.dest.get())
+        slow = _slow_drive(str(dest)) if self.opts["build"].get() else None
+        if slow and not messagebox.askyesno(
+                "Disco lento",
+                f"El destino está en un {slow}. Compilar un proyecto de Unreal ahí puede tardar casi una hora "
+                "en vez de unos minutos. Se recomienda un SSD interno.\n\n¿Continuar igualmente?"):
+            return
         if dest.exists() and any(dest.iterdir()) and not (dest / "Unity2UE").exists():
             if not messagebox.askyesno("Carpeta no vacía", f"{dest} no está vacía. ¿Convertir igualmente ahí?"):
                 return

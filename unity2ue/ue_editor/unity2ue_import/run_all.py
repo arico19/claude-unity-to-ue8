@@ -20,10 +20,18 @@ if os.path.dirname(_HERE) not in sys.path:
 
 import unreal  # noqa: E402
 
-from unity2ue_import import blueprints, data_assets, import_assets, input_actions, levels, materials  # noqa: E402
-from unity2ue_import.common import LOG, load_json  # noqa: E402
+from unity2ue_import import (  # noqa: E402
+    anim_clips,
+    blueprints,
+    data_assets,
+    import_assets,
+    input_actions,
+    levels,
+    materials,
+)
+from unity2ue_import.common import LOG, load_json, save_all_dirty  # noqa: E402
 
-ALL_STEPS = ("assets", "materials", "input", "blueprints", "data", "levels")
+ALL_STEPS = ("assets", "anims", "materials", "input", "blueprints", "data", "levels")
 
 
 def main(steps: tuple[str, ...] | None = None) -> str:
@@ -32,10 +40,16 @@ def main(steps: tuple[str, ...] | None = None) -> str:
     unreal.log(f"[unity2ue] Pasos: {', '.join(steps)}")
     if "assets" in steps:
         import_assets.run(load_json("assets.json"))
+        save_all_dirty()
+    if "anims" in steps:
+        anim_clips.run(load_json("anim_clips.json"))
+        save_all_dirty()
     if "materials" in steps:
         materials.run(load_json("materials.json"))
+        save_all_dirty()
     if "input" in steps:
         input_actions.run()
+        save_all_dirty()
     if "blueprints" in steps or "levels" in steps:
         # Nivel vacío: que ningún nivel generado quede cargado mientras se reconstruye.
         try:
@@ -44,10 +58,13 @@ def main(steps: tuple[str, ...] | None = None) -> str:
             pass
     if "blueprints" in steps:
         blueprints.run(load_json("blueprints.json"))
+        save_all_dirty()
     if "data" in steps:
         data_assets.run(load_json("data_assets.json"))
+        save_all_dirty()
     if "levels" in steps:
         levels.run(load_json("levels.json"))
+        save_all_dirty()
     path = LOG.save()
     summary = {}
     for e in LOG.entries:

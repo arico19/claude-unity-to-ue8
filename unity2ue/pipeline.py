@@ -23,6 +23,7 @@ from typing import Any, Callable
 
 from . import __version__
 from .config import ConversionConfig
+from .convert.anim_clips import convert_anim_clip
 from .convert.animators import convert_animator
 from .convert.context import ConversionContext, ScriptInfo
 from .convert.cpp_gen import CppGenerator, build_plans
@@ -342,13 +343,20 @@ class Converter:
                 data = self._safe(lambda a=a: convert_animator(self.ctx, a.path), a.path)
                 if data:
                     items.append(data)
-        clips = [a.path for a in self._assets("animation")]
-        if clips:
-            self.ctx.manual("animations", f"{len(clips)} clips .anim de Unity (curvas de transform/propiedades): "
-                                          "recrear como Level Sequence/Timeline o AnimSequence según el uso.")
+        clips = [a.path for a in self._assets("animation") if a.path.lower().endswith(".anim")]
+        converted = []
+        for c in clips:
+            data = self._safe(lambda c=c: convert_anim_clip(self.ctx, c), c)
+            if data:
+                converted.append(data)
+        if converted:
+            _json(out / "Unity2UE" / "anim_clips.json", {"clips": converted})
+        if len(converted) < len(clips):
+            self.ctx.manual("animations", f"{len(clips) - len(converted)} clips .anim sin curvas de huesos "
+                                          "(propiedades/eventos): recrear como Level Sequence o Timeline.")
         if items or clips:
             _json(out / "Unity2UE" / "animators.json", {"controllers": items, "anim_clips": clips})
-        return {"animator_controllers": len(items), "anim_clips": len(clips)}
+        return {"animator_controllers": len(items), "anim_clips": len(clips), "anim_clips_converted": len(converted)}
 
     def phase_data_assets(self, out: Path) -> dict[str, Any]:
         """Ficheros .asset de ScriptableObjects del proyecto -> DataAssets."""

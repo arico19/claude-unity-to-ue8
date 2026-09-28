@@ -69,13 +69,14 @@ class PlayTest:
                 if self.shots and elapsed >= self.shots[0]:
                     sec = self.shots.pop(0)
                     world = self.ues.get_game_world()
-                    name = os.path.join(OUT, f"play_{int(sec):02d}s.png").replace("\\", "/")
+                    name = os.path.join(OUT, f"play_{sec:04.1f}s.png").replace("\\", "/")
                     if world:
                         unreal.SystemLibrary.execute_console_command(world, f"HighResShot 1280x720 filename={name}")
                         self.done.append(name)
                     else:
                         unreal.log_error("[unity2ue][play] No hay mundo de juego (¿no arrancó el Play?)")
                 if not self.shots and elapsed >= SHOTS[-1] + 2:
+                    self._dump_actors()
                     self.les.editor_request_end_play()
                     self.state, self.frames = "ending", 0
             elif self.state == "ending" and self.frames > 30:
@@ -83,6 +84,32 @@ class PlayTest:
         except Exception as exc:  # noqa: BLE001
             unreal.log_error(f"[unity2ue][play] {exc}")
             self.finish()
+
+    def _dump_actors(self) -> None:
+        """Guarda qué actores hay durante la partida (posición, rotación, mallas) en play/actors.json."""
+        world = self.ues.get_game_world()
+        if not world:
+            return
+        out = []
+        for a in unreal.GameplayStatics.get_all_actors_of_class(world, unreal.Actor):
+            meshes = []
+            for c in a.get_components_by_class(unreal.PrimitiveComponent):
+                mesh = None
+                if isinstance(c, unreal.StaticMeshComponent):
+                    mesh = c.get_editor_property("static_mesh")
+                elif isinstance(c, unreal.SkeletalMeshComponent):
+                    mesh = c.get_skeletal_mesh_asset() if hasattr(c, "get_skeletal_mesh_asset") else None
+                if isinstance(c, (unreal.StaticMeshComponent, unreal.SkeletalMeshComponent)):
+                    meshes.append({"comp": c.get_name(), "mesh": mesh.get_name() if mesh else None,
+                                   "visible": c.is_visible()})
+            loc, rot = a.get_actor_location(), a.get_actor_rotation()
+            out.append({"name": a.get_name(), "class": a.get_class().get_name(),
+                        "location": [round(loc.x), round(loc.y), round(loc.z)],
+                        "yaw": round(rot.yaw), "hidden": a.is_hidden_ed() if hasattr(a, "is_hidden_ed") else None,
+                        "meshes": meshes})
+        with open(os.path.join(OUT, "actors.json"), "w", encoding="utf-8") as fh:
+            json.dump(out, fh, indent=1)
+        unreal.log(f"[unity2ue][play] {len(out)} actores en la partida -> actors.json")
 
     def finish(self) -> None:
         unreal.unregister_slate_post_tick_callback(self.handle)

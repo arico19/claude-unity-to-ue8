@@ -91,7 +91,9 @@ class UERunner:
         self.log("[UE 1/4] Compilando el módulo C++...")
         bat = self.ue / "Engine" / "Build" / "BatchFiles" / "Build.bat"
         code = self._run([str(bat), f"{self.module}Editor", "Win64", "Development",
-                          f"-Project={self.uproject}", "-WaitMutex"], "build.log", 7200)
+                          f"-Project={self.uproject}", "-WaitMutex", "-NoUBA"], "build.log", 7200)
+        # -NoUBA: el ejecutor UBA (Unreal Build Accelerator) se queda esperando sin usar CPU en
+        # algunos equipos y una compilación de minutos tarda casi una hora.
         if code != 0:
             errors = [ln.strip() for ln in (self.logs / "build.log").read_text("utf-8", "replace").splitlines()
                       if "error" in ln.lower()][:15]

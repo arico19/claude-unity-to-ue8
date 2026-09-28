@@ -294,7 +294,7 @@ set PROJECT=%~dp0{module}.uproject
 
 if "%1"=="--skip-build" goto import
 echo [1/2] Compilando el módulo C++...
-call "%UE_ROOT%\\Engine\\Build\\BatchFiles\\Build.bat" {module}Editor Win64 Development -Project="%PROJECT%" -WaitMutex
+call "%UE_ROOT%\\Engine\\Build\\BatchFiles\\Build.bat" {module}Editor Win64 Development -Project="%PROJECT%" -WaitMutex -NoUBA
 if errorlevel 1 (
   echo La compilacion fallo. Revisa los scripts convertidos en Source\\{module}\\Unity
   echo Puedes continuar la importacion sin C++ con: %~nx0 --skip-build

@@ -7,6 +7,7 @@ nodos que referencian el Blueprint generado para ese prefab, con sus overrides.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ..unity import class_ids as C
@@ -104,6 +105,15 @@ class HierarchyConverter:
         name = prefab_info.abs_path.stem if prefab_info else "PrefabInstance"
         root_transform_id = self._prefab_root_transform(guid)
         root_go_id = self._prefab_root_game_object(guid)
+        if prefab_info is not None and prefab_info.category == "model":
+            # En un FBX el fileID de su transform raíz es interno del modelo; Unity siempre guarda
+            # m_LocalPosition del transform raíz de la instancia, así que se identifica por eso
+            # (si no, se pierden la escala y la rotación de la instancia).
+            root_transform_id = next(
+                (ref_file_id(m.get("target")) for m in mod.get("m_Modifications") or []
+                 if str(m.get("propertyPath")) == "m_LocalPosition.x" and ref_guid(m.get("target")) == guid),
+                None,
+            )
 
         pos: dict[str, Any] = {}
         rot: dict[str, Any] = {}
@@ -142,6 +152,21 @@ class HierarchyConverter:
         position = {**base_t.get("m_LocalPosition", {}), **pos}
         rotation = {**base_t.get("m_LocalRotation", {"x": 0, "y": 0, "z": 0, "w": 1}), **rot}
         scale = {**base_t.get("m_LocalScale", {"x": 1, "y": 1, "z": 1}), **scl}
+        if prefab_info is not None and prefab_info.category == "model":
+            # FBX arrastrado directamente a la escena/prefab: no hay Blueprint del modelo; se crea
+            # el componente de malla en el propio nodo (si no, el actor queda invisible).
+            return {
+                "id": str(inst.file_id),
+                "name": name,
+                "active": active,
+                "tag": "Untagged",
+                "layer": 0,
+                "static": False,
+                "transform": transform_to_ue(position, rotation, scale),
+                "components": [self._model_mesh_component(prefab_info, ref, overrides, f"{self.path}:{name}")],
+                "children": [],
+                "model_instance": prefab_info.path,
+            }
         if overrides:
             self.ctx.info(
                 f"{self.path}:{name}",
@@ -165,6 +190,31 @@ class HierarchyConverter:
                 "removed_components": [ref_file_id(r) for r in mod.get("m_RemovedComponents") or []],
             },
         }
+
+    def _model_mesh_component(self, info: Any, ref: dict[str, Any] | None, overrides: list[dict[str, Any]],
+                              src: str) -> dict[str, Any]:
+        """Componente de malla para una instancia directa de un modelo (FBX/OBJ/glTF)."""
+        # Con esqueleto si el FBX tiene rig (animationType != None) y algún SkinnedMeshRenderer.
+        # (Unity 2022+ puede no listar los sub-objetos en el .meta: entonces basta con el rig.)
+        subs = info.sub_objects
+        has_skin = any(cls == C.SKINNED_MESH_RENDERER for cls, _fid, _n in subs) or not subs
+        skeletal = has_skin and int(info.importer.get("animationType", 0) or 0) != 0
+        mesh = dict(ref or {}, kind="model")
+        self.ctx.mark_model(mesh, skeletal=skeletal, source=src)
+        # Materiales sobrescritos en la instancia (m_Materials.Array.data[i]) o remapeados en el .meta.
+        slots: dict[int, dict[str, Any] | None] = {}
+        for o in overrides:
+            m = re.match(r"m_Materials\.Array\.data\[(\d+)\]", o.get("property") or "")
+            if m and o.get("object_reference"):
+                slots[int(m.group(1))] = o["object_reference"]
+        if not slots:
+            for i, e in enumerate(info.importer.get("externalObjects") or []):
+                first = (e or {}).get("first") or {}
+                if "Material" in str(first.get("type", "")):
+                    slots[i] = self.ctx.asset_ref((e or {}).get("second"), src)
+        materials = [slots.get(i) for i in range(max(slots) + 1)] if slots else []
+        return {"type": "SkeletalMesh" if skeletal else "StaticMesh", "mesh": mesh, "materials": materials,
+                "cast_shadow": True, "visible": True}
 
     # --------------------------------------------------------- info de prefabs fuente
     def _prefab_doc(self, guid: str | None) -> UnityDocument | None:
@@ -317,7 +367,9 @@ class HierarchyConverter:
             """Devuelve True si el nodo debe conservarse."""
             nonlocal pruned
             node["children"] = [c for c in node.get("children", []) if visit(c)]
-            if any(c.get("type") == "SkeletalMesh" for c in node.get("components", [])):
+            # (No en instancias de modelo: ahí el transform es el de la instancia, con su escala.)
+            if not node.get("model_instance") and any(
+                    c.get("type") == "SkeletalMesh" for c in node.get("components", [])):
                 node["transform"] = dict(identity)
                 node["skinned_transform_ignored"] = True
             is_bone = tid_of.get(id(node)) in bones

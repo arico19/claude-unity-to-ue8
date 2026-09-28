@@ -125,6 +125,15 @@ def create_or_load(name: str, folder: str, asset_class, factory):
     return ASSET_TOOLS.create_asset(name, folder, asset_class, factory), True
 
 
+def save_all_dirty() -> None:
+    """Guarda todos los paquetes modificados: una importación puede crear assets auxiliares
+    (esqueleto, physics asset) que ``import_asset_tasks`` no guarda y se perderían al cerrar."""
+    try:
+        unreal.EditorLoadingAndSavingUtils.save_dirty_packages(True, True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def save(asset) -> None:
     try:
         EAL.save_loaded_asset(asset, only_if_is_dirty=False)

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import glob
 import os
 import shutil
+import subprocess
 
 import unreal
 
@@ -46,7 +48,35 @@ def _fbx_options(item: dict):
     sk = opts.get_editor_property("skeletal_mesh_import_data")
     set_prop(sk, "import_uniform_scale", scale)
     set_prop(sk, "import_morph_targets", True)
+    # Los FBX preparados para Unity miran hacia +Z (su "adelante"); por defecto UE los deja mirando
+    # a -Y. Con Force Front X Axis quedan mirando a +X, que es el "adelante" de Unity en nuestra
+    # conversión de ejes (UE.X = Unity.Z): personajes y vehículos miran hacia donde deben.
+    # Convert Scene Unit: respetar las unidades del FBX (muchos vienen en metros; sin esto UE los
+    # trata como centímetros y el modelo sale 100 veces más pequeño).
+    for data in (sm, sk, opts.get_editor_property("anim_sequence_import_data")):
+        for prop, value in FBX_AXIS_OPTIONS.items():
+            set_prop(data, prop, value)
     return opts
+
+
+FBX_AXIS_OPTIONS = {"force_front_x_axis": True, "convert_scene": True, "convert_scene_unit": True}
+
+
+def _sync_existing_import_data(dest: str) -> None:
+    """Al reimportar, UE usa las opciones guardadas en el asset existente: se actualizan antes."""
+    if not unreal.EditorAssetLibrary.does_directory_exist(dest):
+        return
+    for p in unreal.EditorAssetLibrary.list_assets(dest, recursive=True, include_folder=False):
+        asset = load(p)
+        if not isinstance(asset, (unreal.StaticMesh, unreal.SkeletalMesh, unreal.AnimSequence)):
+            continue
+        try:
+            data = asset.get_editor_property("asset_import_data")
+        except Exception:  # noqa: BLE001
+            continue
+        if data is not None:
+            for prop, value in FBX_AXIS_OPTIONS.items():
+                set_prop(data, prop, value)
 
 
 def _find_skeleton(dest: str):
@@ -59,6 +89,42 @@ def _find_skeleton(dest: str):
                 return load(p)
         folder = folder.rsplit("/", 1)[0]
     return None
+
+
+def _find_blender() -> str | None:
+    cands = [os.environ.get("BLENDER", ""), shutil.which("blender") or ""]
+    cands += sorted(glob.glob(r"C:\Program Files\Blender Foundation\*\blender.exe"), reverse=True)
+    cands += [f"{d}:\\blender\\blender.exe" for d in "CDEFGH"]
+    return next((c for c in cands if c and os.path.isfile(c)), None)
+
+
+def _blender_fix_root(src: str) -> str | None:
+    """Pasa el FBX por Blender para dejar un único hueso raíz. Devuelve el FBX corregido o None."""
+    blender = _find_blender()
+    if not blender:
+        LOG.warn(STEP, src, "Blender no encontrado (variable BLENDER): no se puede corregir el esqueleto")
+        return None
+    out = os.path.splitext(src)[0] + "_root.fbx"
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "blender_fix_root.py")
+    try:
+        subprocess.run([blender, "-b", "--factory-startup", "-P", script, "--", src, out],
+                       capture_output=True, timeout=600, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out if os.path.isfile(out) else None
+
+
+def _import_with_interchange(src: str, dest: str, name: str) -> list[str]:
+    _set_legacy_fbx(False)
+    try:
+        task = _task(src, dest, name, None)
+        ASSET_TOOLS.import_asset_tasks([task])
+        return [str(p) for p in (task.get_editor_property("imported_object_paths") or [])]
+    except Exception:  # noqa: BLE001
+        LOG.exception(STEP, f"{src}: Interchange")
+        return []
+    finally:
+        _set_legacy_fbx(True)
 
 
 def _retry_model(item: dict, src: str) -> list[str]:
@@ -81,6 +147,23 @@ def _retry_model(item: dict, src: str) -> list[str]:
             LOG.warn(STEP, item["unity_path"], f"Sólo animación: importada sobre el esqueleto {skeleton.get_path_name()} "
                      "(revisa que los huesos coincidan)")
             return paths
+    # Varios huesos raíz (típico de Blender): Blender añade un hueso raíz y se reimporta con el
+    # importador clásico, que conserva todo el esqueleto.
+    fixed = _blender_fix_root(src)
+    if fixed:
+        task = _task(fixed, item["destination_path"], item["destination_name"], _fbx_options(item))
+        ASSET_TOOLS.import_asset_tasks([task])
+        paths = [str(p) for p in (task.get_editor_property("imported_object_paths") or [])]
+        if any(isinstance(load(p), unreal.SkeletalMesh) for p in paths):
+            LOG.warn(STEP, item["unity_path"], "Esqueleto con varios huesos raíz: Blender añadió un hueso 'root' "
+                     "y se importó con esqueleto")
+            return paths
+    # Último recurso con esqueleto: Interchange (acepta más rigs, pero con varias raíces sólo
+    # conserva una rama). Nombre distinto para no chocar con una StaticMesh de un intento anterior.
+    paths = _import_with_interchange(src, item["destination_path"], item["destination_name"] + "_Skel")
+    if any(isinstance(load(p), unreal.SkeletalMesh) for p in paths):
+        LOG.warn(STEP, item["unity_path"], "Importado con esqueleto usando Interchange (el importador clásico lo rechazó)")
+        return paths
     static = dict(item, skeletal=False, import_animations=False)
     task = _task(src, item["destination_path"], item["destination_name"], _fbx_options(static))
     ASSET_TOOLS.import_asset_tasks([task])
@@ -186,6 +269,8 @@ def run(data: dict | None, only: set[str] | None = None) -> None:
             continue
         ensure_dir(item["destination_path"])
         opts = _fbx_options(item) if item["type"] == "model" and src.lower().endswith(".fbx") else None
+        if opts is not None:
+            _sync_existing_import_data(item["destination_path"])
         batch.append((item, _task(src, item["destination_path"], item["destination_name"], opts)))
 
     # Importar por lotes para dar feedback y no perder todo ante un fallo.
