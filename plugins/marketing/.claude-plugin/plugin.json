@@ -1,0 +1,9 @@
+{
+  "name": "marketing",
+  "version": "1.2.0-video.1",
+  "description": "Marketing para un reproductor y organizador de vídeo: contenido bilingüe (ES/EN), campañas, voz de marca, competencia, SEO, email y YouTube. Adaptado del plugin marketing de Anthropic.",
+  "author": {
+    "name": "arico19"
+  },
+  "license": "Apache-2.0"
+}

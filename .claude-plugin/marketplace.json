@@ -1,0 +1,16 @@
+{
+  "name": "arico19-plugins",
+  "owner": {
+    "name": "arico19"
+  },
+  "metadata": {
+    "description": "Plugins de arico19: marketing para un reproductor y organizador de vídeo."
+  },
+  "plugins": [
+    {
+      "name": "marketing",
+      "source": "./plugins/marketing",
+      "description": "Marketing bilingüe (ES/EN) para un reproductor y organizador de vídeo, con foco en YouTube."
+    }
+  ]
+}
