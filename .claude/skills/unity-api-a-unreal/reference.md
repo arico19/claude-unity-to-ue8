@@ -191,3 +191,32 @@ Notación: `Owner` = `GetOwner()` (AActor*). Los helpers marcados con † existe
 | `[Header("X")]` / `[Range(a,b)]` / `[Tooltip]` | `Category="X"` / `meta=(ClampMin, ClampMax)` / `meta=(ToolTip)` |
 | `[RequireComponent(typeof(T))]` | crear el componente en el Blueprint/constructor del actor |
 | `NavMeshAgent.SetDestination(p)` | `UAIBlueprintHelperLibrary::SimpleMoveToLocation(Controller, P)` / `AAIController::MoveToLocation` |
+
+## Steamworks (Steamworks.NET / Facepunch → `USteamIntegrationSubsystem`)
+
+Generado por `unity2ue steam integrate` en `Source/<Módulo>/Steam/`. Incluye
+`"Steam/SteamIntegrationSubsystem.h"` y `"Steam/SteamIds.h"`; usa las constantes de `SteamIds::`
+en lugar de cadenas. Todas las llamadas devuelven false/0 sin Steam (editor, PIE): no hace falta
+comprobar nada antes. `auto* Steam = USteamIntegrationSubsystem::Get(this);` (puede ser nullptr).
+
+| Unity (C#) | Unreal Engine 5.8 (C++) |
+|---|---|
+| `SteamManager.Initialized` / `SteamClient.IsValid` | `Steam && Steam->IsSteamAvailable()` |
+| `SteamManager` (MonoBehaviour de inicialización) | nada: lo inicializa OnlineSubsystemSteam; deja el componente vacío |
+| `SteamUserStats.SetAchievement("X"); StoreStats()` / `new Achievement("X").Trigger()` | `Steam->UnlockAchievement(SteamIds::Achievements::X)` (ya hace StoreStats) |
+| `SteamUserStats.GetAchievement("X", out bool b)` / `achievement.State` | `Steam->IsAchievementUnlocked(SteamIds::Achievements::X)` |
+| `SteamUserStats.IndicateAchievementProgress("X", cur, max)` | `Steam->ShowAchievementProgress(..., Cur, Max)` |
+| `SteamUserStats.SetStat("S", int)` / `SetStat("S", float)` | `Steam->SetStatInt(...)` / `Steam->SetStatFloat(...)` |
+| `SteamUserStats.AddStat("S", n)` (Facepunch) | `Steam->AddToStatInt(SteamIds::Stats::S, N)` |
+| `SteamUserStats.GetStat("S", out v)` | `Steam->GetStatInt(...)` / `GetStatFloat(...)` |
+| `SteamUserStats.StoreStats()` | `Steam->StoreStats()` (opcional: se envían solas cada 10 s) |
+| `FindLeaderboard` + `UploadLeaderboardScore` + `CallResult<...>` | `Steam->UploadLeaderboardScore(SteamIds::Leaderboards::L, Score, bKeepBest)`; resultado en `OnLeaderboardScoreUploaded` |
+| `SteamFriends.SetRichPresence("steam_display", "#T")` | `Steam->SetRichPresenceStatus(SteamIds::RichPresence::T)` |
+| `SteamFriends.SetRichPresence(k, v)` / `ClearRichPresence()` | `Steam->SetRichPresence(K, V)` / `Steam->ClearRichPresence()` |
+| `SteamFriends.GetPersonaName()` | `Steam->GetPlayerName()` |
+| `SteamApps.GetCurrentGameLanguage()` | `Steam->GetSteamLanguage()` |
+| `SteamApps.BIsDlcInstalled(new AppId_t(n))` | `Steam->IsDlcInstalled(SteamIds::Dlc::Nombre)` |
+| `SteamFriends.ActivateGameOverlayToWebPage(url)` / `ToStore` | `Steam->OpenOverlayWebPage(Url)` / `Steam->OpenStorePage(AppId)` |
+| `SteamUtils.IsSteamRunningOnSteamDeck()` | `Steam->IsRunningOnSteamDeck()` |
+| `SteamRemoteStorage.FileWrite/FileRead` | `UGameplayStatics::SaveGameToSlot/LoadGameFromSlot` + Steam Auto-Cloud (rutas en `Steam/checklist.md`) |
+| Lobbies / `SteamMatchmaking` / P2P | Online Subsystem (`IOnlineSession`) con `networking: true` en steam.json (SteamSockets) |

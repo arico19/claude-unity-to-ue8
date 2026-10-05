@@ -286,6 +286,11 @@ def generate_project(out_dir: Path, cfg: ConversionConfig, *, settings: dict[str
         shutil.copy2(EDITOR_SCRIPTS / "extra" / "__init__.py", py_dst / "extra" / "__init__.py")
 
     _write(out_dir / ".gitignore", "Binaries/\nDerivedDataCache/\nIntermediate/\nSaved/\n.vs/\n*.sln\n")
+
+    # Si el proyecto ya se preparó para Steam (Steam/steam.json), reconvertir no debe perderlo.
+    from ..steam.integrate import integrate_if_configured
+
+    integrate_if_configured(out_dir)
     return up
 
 

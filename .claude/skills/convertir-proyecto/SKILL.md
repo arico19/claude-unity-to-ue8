@@ -51,3 +51,5 @@ Usa `/tareas-manuales <destino>` para UI (UMG), Animator Controllers (AnimBP), p
 ## 7. Cierre
 Entrega al usuario: ruta del `.uproject`, resumen de lo convertido, lista de pendientes con
 prioridad y cómo abrir el proyecto (doble clic en el `.uproject` → "Yes" a recompilar módulos).
+Si el informe tiene la incidencia `steam` (el proyecto Unity usa Steamworks) o el usuario quiere
+publicar en Steam, ofrécele seguir con `/publicar-steam <destino> <proyecto-unity>`.

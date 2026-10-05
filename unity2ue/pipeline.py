@@ -391,6 +391,10 @@ class Converter:
         for pkg, msg in flags.items():
             if pkg in pk:
                 self.ctx.manual(f"package:{pkg}", msg)
+        if any(pkg in pk for pkg in ("com.rlabrecque.steamworks.net", "com.facepunch.steamworks")) or \
+                (self.project.root / "steam_appid.txt").exists():
+            self.ctx.manual("steam", "El proyecto usa Steamworks: prepara la publicación con "
+                                     "`python -m unity2ue steam init <DestinoUE> --unity <ProyectoUnity>` (ver /publicar-steam).")
         if self.project.serialization_mode not in (None, 2):
             self.ctx.error("ProjectSettings/EditorSettings.asset",
                            "Asset Serialization no es 'Force Text': los assets binarios no se pueden leer.")

@@ -123,9 +123,10 @@ def test_analyze(sample_project):
     data = analyze_project(sample_project)
     assert data["render_pipeline"] == "URP"
     assert data["unity_version"] == "2022.3.20f1"
-    assert data["asset_counts"]["script"] == 4
+    assert data["asset_counts"]["script"] == 5
     assert data["component_usage"]["MeshFilter"] == 4
     assert data["api_usage"]["legacy_input"] == 1
+    assert data["api_usage"]["steamworks"] == 1
 
 
 def test_scriptable_object_assets(converted):

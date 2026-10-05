@@ -16,6 +16,10 @@ La conversión tiene tres capas:
      classID de Unity), `materials.py`, `animators.py`, `coords.py` (cambio de ejes/unidades),
      `csharp.py` (parser C#) + `cpp_gen.py`/`type_map.py` (esqueletos C++).
    - `ue/project_gen.py` genera el `.uproject`, el módulo C++ y `Config/*.ini`.
+   - `steam/` kit de publicación en Steam sobre el proyecto UE generado (`<UE>/Steam/steam.json`):
+     `detect.py` (Steamworks.NET en Unity), `integrate.py` (plugins, `.ini`, `Build.cs`,
+     `USteamIntegrationSubsystem` desde `ue/templates/Steam/`), `check.py` (tienda + `checklist.md`),
+     `build.py` (BuildCookRun) y `upload.py` (SteamPipe + steamcmd). `convert` reaplica la integración.
    - `pipeline.py` orquesta todo; `cli.py` expone `analyze`, `convert`, `scripts`.
 2. **Scripts del editor de Unreal (`unity2ue/ue_editor/unity2ue_import/`)** — se copian a
    `<ProyectoUE>/Content/Python/` y se ejecutan DENTRO de Unreal (`import unreal`): importan
@@ -35,6 +39,7 @@ python3 -m unity2ue convert <ProyectoUnity> <DestinoUE> --name MiJuego
 python3 -m unity2ue scripts <DestinoUE> --pending              # cola de traducción C# -> C++
 python3 -m unity2ue full <ProyectoUnity> <DestinoUE> --name MiJuego  # todo: convert + UE (compilar, importar, verificar, capturas)
 python3 -m unity2ue ue <DestinoUE> [--steps import,verify,screenshots]  # sólo los pasos dentro de UE
+python3 -m unity2ue steam init|integrate|check|build|upload|publish <DestinoUE>  # publicar en Steam
 python3 -m pytest -q                                           # tests (fixture: tests/fixtures/SampleUnityProject)
 ruff check unity2ue tests
 ```
@@ -43,6 +48,7 @@ Skills (slash commands) del proyecto:
 - `/convertir-proyecto <ProyectoUnity> <DestinoUE>` — flujo completo de principio a fin.
 - `/convertir-scripts <DestinoUE>` — traduce los scripts pendientes con subagentes en paralelo.
 - `/tareas-manuales <DestinoUE>` — UI → UMG, Animator → AnimBP, partículas → Niagara, shaders.
+- `/publicar-steam <DestinoUE> [ProyectoUnity]` — Steamworks, tienda, empaquetado y subida a Steam.
 
 Subagentes: `unity-analyzer`, `csharp-to-cpp`, `cpp-reviewer`, `ue-content-builder`.
 
@@ -67,6 +73,10 @@ Subagentes: `unity-analyzer`, `csharp-to-cpp`, `cpp-reviewer`, `ue-content-build
   por clase está en `ScriptPlan.field_maps` y se usa para asignar valores serializados en los
   niveles. Si renombras una propiedad al traducir, actualiza también los datos o el log del editor
   avisará de que no pudo asignar el valor.
+
+- **Steam:** lo que `integrate` escribe en ficheros que genera `convert` (`.ini`, `Build.cs`) va entre
+  marcas `>>> unity2ue steam` / `<<< unity2ue steam`. Nunca se guardan contraseñas; nunca se publica en
+  la rama `default` desde SteamPipe.
 
 ## Reglas para trabajar en este repo
 

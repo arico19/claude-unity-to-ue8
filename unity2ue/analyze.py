@@ -31,6 +31,7 @@ API_PATTERNS = {
     "editor_only": r"UnityEditor|#if UNITY_EDITOR",
     "unsafe_or_native": r"\bunsafe\b|DllImport|NativeArray|Unity\.Jobs|Unity\.Burst",
     "dots_ecs": r"Unity\.Entities|IComponentData|SystemBase|ISystem",
+    "steamworks": r"\busing Steamworks\b|\bSteamUserStats\.|\bSteamFriends\.|\bSteamManager\b|Facepunch\.Steamworks",
 }
 
 
@@ -99,6 +100,9 @@ def analyze_project(project_path: str | Path, cfg: ConversionConfig | None = Non
         risks.append("DOTS/ECS: no tiene traducción directa (considerar Mass Entity de UE).")
     if api_usage.get("ui") or component_usage.get("Canvas"):
         risks.append("UI uGUI/TMP: recrear en UMG.")
+    if api_usage.get("steamworks"):
+        risks.append("Steamworks (Steamworks.NET/Facepunch): usa `unity2ue steam init` para migrar logros, "
+                     "estadísticas y marcadores al subsistema Steam de UE.")
     other_models = [a.path for a in p.guids.of_category("model") if a.abs_path.suffix.lower() in (".blend", ".max", ".ma", ".mb")]
     if other_models:
         risks.append(f"{len(other_models)} modelos en formato nativo (.blend/.max/.ma): exportar a FBX.")

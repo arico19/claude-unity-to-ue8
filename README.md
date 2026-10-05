@@ -37,6 +37,7 @@ manuales (`/tareas-manuales`).
 | `/convertir-proyecto` | Flujo completo de principio a fin |
 | `/convertir-scripts` | Traduce los stubs C++ pendientes con `csharp-to-cpp` en paralelo + revisión |
 | `/tareas-manuales` | UI → UMG, Animator → AnimBP, partículas → Niagara, shaders, terrenos |
+| `/publicar-steam` | Steamworks (logros, stats, marcadores, nube), tienda, empaquetado y subida a Steam |
 | `unity-api-a-unreal` | Tabla de equivalencias de API Unity → UE 5.8 |
 | agente `unity-analyzer` | Plan de migración y riesgos (sólo lectura) |
 | agente `csharp-to-cpp` | Traduce cuerpos de métodos C# a C++ de UE |
@@ -84,6 +85,14 @@ UE_ROOT=/opt/UnrealEngine ./Unity2UE_Import.sh
 
 El script compila el módulo C++ y ejecuta `unity2ue_import/run_all.py` en el editor. Se puede
 repetir un paso concreto con `UNITY2UE_STEPS=materials,levels`.
+
+## Publicar en Steam
+
+`python -m unity2ue steam init|integrate|check|build|upload|publish <DestinoUE>` (o `/publicar-steam`):
+recupera de Unity los logros, estadísticas y marcadores de Steamworks.NET, integra Steam en el
+proyecto UE (OnlineSubsystemSteam + subsistema C++ `USteamIntegrationSubsystem`), valida las
+imágenes de la tienda, empaqueta en Shipping y sube la build con SteamPipe a una rama beta.
+Guía completa: [docs/03-publicar-en-steam.md](docs/03-publicar-en-steam.md).
 
 ## Qué se convierte
 
