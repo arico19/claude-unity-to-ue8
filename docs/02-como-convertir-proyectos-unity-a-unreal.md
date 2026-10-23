@@ -1,6 +1,6 @@
 # Cómo convertir un proyecto Unity a Unreal Engine 5.8 con la aplicación
 
-28 de septiembre de 2026
+28 de septiembre de 2026 (actualizado el 23 de octubre de 2026)
 
 Se abre **"Unity a Unreal 5.8"** (acceso directo en el escritorio), se elige el proyecto Unity y la
 carpeta de destino, y se pulsa **Convertir**: la aplicación hace todos los pasos y al terminar abre el
@@ -37,8 +37,8 @@ proyecto en Unreal.
 
    | Paso | Qué hace | Tiempo orientativo |
    | --- | --- | --- |
-   | Convertir el proyecto Unity | Genera el proyecto UE, los datos intermedios y los esqueletos C++ | 1 min |
-   | Traducir scripts C# → C++ (Claude Code) | Agentes de IA escriben el código de cada script; consume tokens | 10–60 min según el nº de scripts |
+   | Convertir el proyecto Unity | Genera el proyecto UE, los datos intermedios y el C++ de los scripts: el traductor de reglas escribe solo los cuerpos de método que sabe (73% en in-coming) | 1 min |
+   | Lo que las reglas no traduzcan, con el agente de Claude | Sólo si quedan scripts con métodos TODO: el agente de Claude Code los analiza y traduce. Si después el C++ no compila, el agente corrige los errores y se recompila una vez. Consume tokens | 0 si no queda nada; 10–60 min según el nº de scripts |
    | Compilar el C++ | Compila el módulo del juego | 4–5 min la primera vez en SSD; segundos después |
    | Importar en Unreal | Modelos, texturas, sonidos, animaciones, materiales, Blueprints, niveles | 1–3 min |
    | Verificar niveles | Cuenta actores, luces, cámaras y mallas o materiales vacíos | 30 s |
@@ -54,6 +54,9 @@ proyecto en Unreal.
      tabla por nivel.
    - Si se tradujeron scripts, la barra de estado muestra el **coste en tokens y en dólares** de Claude
      Code; también queda en `Unity2UE\coste_claude.json`.
+   - El registro dice cuántos métodos tradujeron las reglas ("Reglas: 222 de 302 métodos traducidos
+     solos") y, si al final quedan scripts pendientes, cuántos son: esos tienen métodos `TODO` que hay
+     que terminar a mano o con `/convertir-scripts` desde Claude Code.
 
 ## Qué encontrarás en el proyecto de Unreal
 
@@ -62,7 +65,7 @@ proyecto en Unreal.
 | `<Nombre>.uproject` | El proyecto; ábrelo con UE 5.8 |
 | `Content\Unity\Maps\` | Un nivel por escena de Unity |
 | `Content\Unity\...` | Assets con la misma estructura de carpetas que en Unity (Blueprints `BP_`, materiales `MI_`, datos `DA_`) |
-| `Source\<Nombre>\Unity\` | Un `.h/.cpp` por script C# (`STUB` sin traducir, `TRANSLATED` ya traducido) |
+| `Source\<Nombre>\Unity\` | Un `.h/.cpp` por script C# (`RULES` traducido entero por reglas, `STUB` con métodos TODO, `TRANSLATED` terminado por el agente o a mano) |
 | `Unity2UE\report.md` | Informe de la conversión y tareas manuales pendientes |
 | `Unity2UE\resultado_ue.md` | Resultado de compilar, importar y verificar |
 | `Unity2UE\logs\` | Registro de cada paso (build, import, verify, play) |

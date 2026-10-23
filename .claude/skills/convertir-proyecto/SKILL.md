@@ -18,13 +18,13 @@ opcionalmente, el nombre del proyecto/módulo). Si falta alguno, pregúntalo.
   regenera `Unity2UE/`, `Content/Python/unity2ue_import/`, `Config/` y los stubs C++ no traducidos).
 
 ## 2. Análisis
-Ejecuta `python3 -m unity2ue analyze "<unity>"`. Para proyectos medianos o grandes delega en el
+Ejecuta `python -m unity2ue analyze "<unity>"`. Para proyectos medianos o grandes delega en el
 subagente `unity-analyzer` para obtener un plan. Resume al usuario: tamaño, riesgos y decisiones
 pendientes. Si hay riesgos bloqueantes (serialización binaria), detente aquí.
 
 ## 3. Conversión determinista
 ```
-python3 -m unity2ue convert "<unity>" "<destino>" --name <Nombre>
+python -m unity2ue convert "<unity>" "<destino>" --name <Nombre>
 ```
 Opciones útiles: `--scene <Escena>` (repetible), `--only-referenced`, `--config cfg.json`
 (ver `unity2ue/config.py`: intensidades de luz, carpetas excluidas...). Lee

@@ -24,6 +24,11 @@ proyecto UE generado por unity2ue y uno o varios scripts de la cola `Unity2UE/sc
    `GetMainCamera(this)` (Camera.main + vista del jugador) y `PlayAnimation(Actor, Clip, bLoop)`.
 
 ## Cómo traducir
+- **Ficheros con métodos ya traducidos por reglas** (cabecera `Métodos traducidos por reglas: N; pendientes
+  (TODO): M`): traduce sólo los métodos que conservan `// TODO(unity2ue)` y respeta los demás. Sigue su
+  misma convención: trabajan en **espacio Unity** (metros, Y arriba) y convierten en la frontera con UE
+  con `UUnityCompatLibrary::UnityToUnrealLocation` / `UnrealToUnityLocation` / `UnityToUnrealQuat` /
+  `LookRotation`, etc. En esos ficheros no multipliques por `UNITY_TO_UE` ni permutes ejes a mano.
 - Traduce cada cuerpo de método; elimina el bloque `// TODO(unity2ue)` y los comentarios con el
   C# una vez traducido. Conserva los comentarios útiles del autor original.
 - Los valores serializados (UPROPERTY, DataAssets) siguen en metros y m/s: multiplícalos por

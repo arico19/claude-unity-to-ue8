@@ -9,7 +9,10 @@ argument-hint: <ruta-proyecto-ue> [filtro-de-ruta]
 Argumentos: `$ARGUMENTS` → ruta del proyecto UE generado y, opcionalmente, un filtro
 (p.ej. `Assets/Scripts/Player`).
 
-1. Lista la cola: `python3 -m unity2ue scripts "<ue>" --pending`. Lee `Unity2UE/scripts.json`.
+1. Lista la cola: `python -m unity2ue scripts "<ue>" --pending` (en Linux/macOS puede ser `python3`).
+   Lee `Unity2UE/scripts.json`. Los ficheros STUB suelen traer ya parte de los métodos traducidos por
+   el traductor de reglas (cabecera "Métodos traducidos por reglas: N; pendientes (TODO): M"): sólo
+   hay que traducir los que conservan `// TODO(unity2ue)`.
 2. Ordena por dependencias: primero enums/structs/ScriptableObjects/utilidades y clases base,
    después los componentes que los usan (mira `#include "Unity/..."` y las declaraciones
    adelantadas `class U...;` de cada header).
@@ -19,7 +22,7 @@ Argumentos: `$ARGUMENTS` → ruta del proyecto UE generado y, opcionalmente, un 
    contexto de las clases de las que dependen (sus headers ya traducidos).
 4. Cuando terminen, lanza `cpp-reviewer` sobre los ficheros traducidos (puede ser en paralelo
    por lotes). Aplica o confirma sus correcciones.
-5. Vuelve a ejecutar `python3 -m unity2ue scripts "<ue>" --pending` hasta que no queden
+5. Vuelve a ejecutar `python -m unity2ue scripts "<ue>" --pending` hasta que no queden
    pendientes (o sólo queden los que el usuario decida dejar).
 6. Informa: scripts traducidos, TODO manuales (`grep -rn "TODO(unity2ue-manual)" Source/`),
    UPROPERTY renombradas y acciones de input que hay que asignar en los Blueprints.

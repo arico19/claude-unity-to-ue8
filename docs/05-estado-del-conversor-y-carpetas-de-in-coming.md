@@ -33,7 +33,10 @@ Cada método se traduce entero o se deja como TODO con el C# original y el motiv
 Animator, interfaz de usuario, parámetros `out`. Para ese resto hay dos caminos:
 
 1. **El agente de Claude Code:** `/convertir-scripts <ProyectoUE>`. Es lo que se usó con in-coming. No
-   necesita clave de API; va con la suscripción de Claude Code.
+   necesita clave de API; va con la suscripción de Claude Code. **La aplicación de escritorio "Unity a
+   Unreal 5.8" lo lanza sola** (paso "Lo que las reglas no traduzcan, con el agente de Claude") cuando tras
+   la conversión quedan scripts con métodos TODO, y otra vez si el C++ no compila, para que corrija los
+   errores antes de recompilar. Si las reglas lo traducen todo, el agente no se lanza.
 2. **Un paso por API dentro del propio comando `full`** (pendiente de hacer): llamaría a Claude por API para
    cada método pendiente, compilaría y repetiría si falla. Sería "un programa y a esperar", pero necesita
    una clave de API y cuesta por tokens.
@@ -56,8 +59,9 @@ Cifras de hoy sobre in-coming (41 scripts, 302 cuerpos entre métodos y getters 
 
 ## 3. Cómo seguir
 
-- Para convertir otro juego: el comando `full` de arriba y después `/convertir-scripts` para los métodos
-  pendientes (o el paso por API cuando exista).
+- Para convertir otro juego: el icono **"Unity a Unreal 5.8"** del escritorio (elegir proyecto Unity y
+  carpeta de salida; hace todo, agente incluido), o el comando `full` de arriba y después
+  `/convertir-scripts` para los métodos pendientes.
 - Para seguir con in-coming: trabajar en `InComingUE`, como hasta ahora.
 - Para subir la cobertura automática: añadir reglas en `body_rules.py` midiendo con el script de cobertura
   (los motivos de rechazo salen en `Unity2UE/report.md` y en la cabecera de cada `.h` generado).

@@ -30,7 +30,7 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 STEPS = [
     ("convert", "Convertir el proyecto Unity"),
-    ("scripts", "Traducir scripts C# → C++ (Claude Code)"),
+    ("scripts", "Lo que las reglas no traduzcan, con el agente de Claude"),
     ("build", "Compilar el C++"),
     ("import", "Importar en Unreal (assets, Blueprints, niveles)"),
     ("verify", "Verificar niveles"),
@@ -63,6 +63,40 @@ def _slow_drive(path: str) -> str | None:
     if media.upper() == "HDD":
         return "disco mecánico (HDD)"
     return None
+
+
+def _pending_scripts(dest: Path) -> list[dict]:
+    """Scripts que aún tienen métodos TODO (las reglas no pudieron con todo) según Unity2UE/scripts.json."""
+    try:
+        data = json.loads((dest / "Unity2UE" / "scripts.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for s in data.get("scripts", []):
+        if s.get("status") != "stub" or not s.get("header"):
+            continue
+        header = dest / s["header"]
+        try:
+            if "UNITY2UE_STATUS: TRANSLATED" in header.read_text("utf-8"):
+                continue
+        except OSError:
+            pass
+        out.append(s)
+    return out
+
+
+_COVERAGE = re.compile(r"Métodos traducidos por reglas: (\d+) de (\d+)")
+
+
+def _build_errors(dest: Path, limit: int = 40) -> str:
+    """Las líneas de error del último build.log (para que el agente las arregle)."""
+    log = dest / "Unity2UE" / "logs" / "build.log"
+    try:
+        lines = log.read_text("utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    errs = [ln.strip() for ln in lines if re.search(r"\berror\b", ln, re.I) and "warning" not in ln.lower()]
+    return "\n".join(dict.fromkeys(errs))[: 6000] if errs else "\n".join(lines[-limit:])
 
 
 def _default_name(unity_path: str) -> str:
@@ -273,23 +307,49 @@ class App(tk.Tk):
                 break
             if step == "convert":
                 self.lines.put(("step", done, labels["convert"]))
-                code = self._exec([PY, "-u", "-m", "unity2ue", "convert", unity, dest, "--name", name], REPO, env)
+                self.coverage = None
+                code = self._exec([PY, "-u", "-m", "unity2ue", "convert", unity, dest, "--name", name], REPO, env,
+                                  self._convert_line)
                 done += 1
+                if self.coverage:
+                    a, b = self.coverage
+                    pct = round(100 * a / b) if b else 100
+                    self.lines.put(f"Reglas: {a} de {b} métodos traducidos solos ({pct}%).")
             elif step == "scripts":
-                self.lines.put(("step", done, labels["scripts"] + " — puede tardar bastante"))
-                prompt = (f"/convertir-scripts {dest}\n\nTrabaja sin preguntar: no compiles ni abras Unreal "
-                          "(lo hace la aplicación después). Al terminar resume qué scripts has traducido.")
-                self.usage = None
-                code = self._exec(["claude", "-p", prompt, "--permission-mode", "acceptEdits",
-                                   "--output-format", "stream-json", "--verbose"], REPO, env, self._claude_line)
-                self._save_usage(Path(dest))
+                pending = _pending_scripts(Path(dest))
                 done += 1
+                if not pending:
+                    self.lines.put(("step", done, labels["scripts"]))
+                    self.lines.put("Las reglas han traducido todos los scripts: no hace falta el agente.")
+                    code = 0
+                    continue
+                self.lines.put(("step", done - 1, f"{labels['scripts']} — {len(pending)} scripts, puede tardar bastante"))
+                for s in pending:
+                    self.lines.put(f"  pendiente: {s['unity_path']}")
+                prompt = (f"/convertir-scripts {dest}\n\n"
+                          "El conversor ya ha traducido por reglas todo lo que ha podido: en cada fichero STUB sólo "
+                          "quedan por traducir los métodos marcados con TODO(unity2ue) (los demás ya están en C++; "
+                          "respétalos y sigue su misma convención de coordenadas). "
+                          "Trabaja sin preguntar: no compiles ni abras Unreal (lo hace la aplicación después). "
+                          "Al terminar resume qué scripts has traducido y qué queda como TODO(unity2ue-manual).")
+                code = self._claude(prompt, env, Path(dest))
             else:
                 for s in ue_steps:
                     self.lines.put(("step", done, labels[s]))
                     code = self._exec([PY, "-u", "-m", "unity2ue", "ue", dest, "--ue-root", self.ue.get(),
                                        "--steps", s], REPO, env)
                     done += 1
+                    if code != 0 and s == "build" and "scripts" in selected and not self.cancelled:
+                        self.lines.put(("step", done - 1, "La compilación falló: el agente de Claude corrige los errores"))
+                        errors = _build_errors(Path(dest))
+                        prompt = (f"El proyecto de Unreal Engine 5.8 en {dest} (generado por unity2ue desde Unity) no "
+                                  "compila. Lee Unity2UE/logs/build.log, corrige los errores en Source/ (sin tocar la "
+                                  "carpeta UnityCompat salvo que sea imprescindible) y no abras Unreal ni compiles tú: "
+                                  "la aplicación recompila después. Trabaja sin preguntar.\n\nErrores:\n" + errors)
+                        self._claude(prompt, env, Path(dest))
+                        self.lines.put(("step", done - 1, labels[s] + " (segundo intento)"))
+                        code = self._exec([PY, "-u", "-m", "unity2ue", "ue", dest, "--ue-root", self.ue.get(),
+                                           "--steps", s], REPO, env)
                     if code != 0 and s == "build":
                         self.lines.put("La compilación falló: revisa Unity2UE\\logs\\build.log. Se continúa sin C++ nuevo.")
                     if self.cancelled:
@@ -301,6 +361,27 @@ class App(tk.Tk):
         self.lines.put(("done", ok and not self.cancelled))
 
     # ------------------------------------------------------------------ Claude Code
+    def _convert_line(self, line: str) -> None:
+        self.lines.put(line)
+        m = _COVERAGE.search(line)
+        if m:
+            self.coverage = (int(m.group(1)), int(m.group(2)))
+
+    CLAUDE_TOOLS = ("Read,Edit,Write,Glob,Grep,Agent,Skill,"
+                    "Bash(python -m unity2ue:*),Bash(python3 -m unity2ue:*),Bash(grep:*),Bash(rg:*)")
+
+    def _claude(self, prompt: str, env: dict, dest: Path) -> int:
+        """Lanza el agente de Claude Code sin ventana y muestra su progreso; guarda el coste en Unity2UE."""
+        self.usage = None
+        code = self._exec(["claude", "-p", prompt, "--permission-mode", "acceptEdits",
+                           "--allowedTools", self.CLAUDE_TOOLS,
+                           "--output-format", "stream-json", "--verbose"], REPO, env, self._claude_line)
+        self._save_usage(dest)
+        left = _pending_scripts(dest)
+        if left:
+            self.lines.put(f"Siguen pendientes {len(left)} scripts (quedan métodos TODO para hacer a mano o con el agente).")
+        return code
+
     def _claude_line(self, line: str) -> None:
         """Muestra el progreso de Claude Code (stream-json) y guarda el resumen de uso final."""
         try:
@@ -340,6 +421,13 @@ class App(tk.Tk):
         }
         summary["total_tokens"] = sum(summary[k] for k in ("input_tokens", "output_tokens",
                                                            "cache_creation_input_tokens", "cache_read_input_tokens"))
+        prev = getattr(self, "usage_summary", None)
+        if prev:  # varias llamadas al agente en la misma conversión: se suman
+            for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
+                      "total_tokens", "duration_s"):
+                summary[k] += prev.get(k) or 0
+            if isinstance(prev.get("total_cost_usd"), (int, float)) and isinstance(summary["total_cost_usd"], (int, float)):
+                summary["total_cost_usd"] += prev["total_cost_usd"]
         self.usage_summary = summary
         try:
             (dest / "Unity2UE").mkdir(parents=True, exist_ok=True)
