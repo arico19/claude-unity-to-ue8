@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
+#include "UObject/UObjectIterator.h"
 #include "UnityCompatLibrary.generated.h"
 
 class ACameraActor;
@@ -108,6 +109,28 @@ public:
 	/** new GameObject(name) [+ transform.SetParent(parent)]: actor vacío con raíz de escena. */
 	UFUNCTION(BlueprintCallable, Category = "Unity", meta = (WorldContext = "WorldContextObject"))
 	static AActor* NewGameObject(const UObject* WorldContextObject, const FString& Name, AActor* Parent = nullptr);
+
+	/** Object.FindObjectsByType<T>() / FindObjectsOfType<T>(): componentes (o actores) de ese tipo en el mundo. */
+	template <typename T>
+	static TArray<T*> FindObjectsOfType(const UObject* WorldContextObject)
+	{
+		TArray<T*> Out;
+		UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+		if (!World) { return Out; }
+		for (TObjectIterator<T> It; It; ++It)
+		{
+			if (It->GetWorld() == World && !It->IsTemplate() && IsValid(*It)) { Out.Add(*It); }
+		}
+		return Out;
+	}
+
+	/** Object.FindFirstObjectByType<T>() / FindObjectOfType<T>() */
+	template <typename T>
+	static T* FindFirstObjectOfType(const UObject* WorldContextObject)
+	{
+		TArray<T*> All = FindObjectsOfType<T>(WorldContextObject);
+		return All.Num() ? All[0] : nullptr;
+	}
 
 	/** gameObject.AddComponent<T>() */
 	template <typename T>

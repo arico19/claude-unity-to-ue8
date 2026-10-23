@@ -454,7 +454,12 @@ class RuleTranslator:
             self.i += 1
 
     # --- entrada ------------------------------------------------------------------------------
+    _ADJ_STR = re.compile(r'(?<![$@\w])"((?:\\.|[^"\\])*)"\s*\+\s*(?<![$@])"((?:\\.|[^"\\])*)"')
+
     def translate(self, body: str) -> list[str]:
+        prev = None
+        while prev != body:  # "a" + "b" + "c" -> "abc"
+            prev, body = body, self._ADJ_STR.sub(lambda m: '"' + m.group(1) + m.group(2) + '"', body)
         self.pre_check(body)
         self.toks = [t for t in tokenize(body) if t.kind != "nl"]
         self.i = 0
@@ -472,10 +477,11 @@ class RuleTranslator:
         for op, why in REJECT_OPS.items():
             if op in masked:
                 raise Unsupported(why)
-        if re.search(r"\.(" + "|".join(LINQ) + r")\s*\(", masked):
-            raise Unsupported("LINQ/List.Find")
-        if re.search(r"\bnew\s+[\w.<>]+\s*\[", masked):
-            raise Unsupported("new T[]")
+        for m in re.finditer(r"(\w+)\s*\.(" + "|".join(LINQ) + r")\s*\(", masked):
+            if m.group(1) not in UNITY_STATIC and m.group(1) not in self.ctx.types:
+                raise Unsupported("LINQ/List.Find")
+        if re.search(r"\bnew\s+[\w.<>]+\s*\[\s*[^\]\s]", masked):
+            raise Unsupported("new T[n]")
         if re.search(r"\bnew\s*\{", masked):
             raise Unsupported("tipo anónimo")
         if re.search(r"\[\s*\^", masked):
@@ -483,7 +489,7 @@ class RuleTranslator:
         if "?." in masked and not re.fullmatch(r"(?s).*", masked):
             raise Unsupported("operador ?.")
         for m in re.finditer(r"\?\.\s*(\w+)", masked):
-            if m.group(1) != "Invoke":
+            if m.group(1) != "Invoke" and not re.match(r"[ \t]*\w+\s*\?\.\s*\w+\s*\(", masked[masked.rfind("\n", 0, m.start()) + 1:]):
                 raise Unsupported("operador ?.")
         if self.ctx.owner_kind in ("library", "struct", "enum", "interface", "data_asset", "object"):
             # sólo los usos "propios" (sin ``x.`` delante): ``.transform`` de otro objeto sí vale
@@ -557,6 +563,11 @@ class RuleTranslator:
             if w == "var" or self.is_declaration():
                 return self.declaration(indent)
         toks = self.collect_until({";"}, consume=True)
+        if len(toks) >= 4 and toks[0].kind == "id" and toks[1].text == "?." and toks[2].kind == "id" and toks[3].text == "(":
+            target = self.expr_tokens(toks[:1])
+            if self.ctx.kind(target.type) in ("pcomponent", "pobject", "ucomponent", "uasset", "gameobject", "transform"):
+                call = self.expr_tokens([toks[0], Tok("op", ".")] + toks[2:])
+                return [f"{indent}if ({target.code})", f"{indent}{{", f"{indent}\t{call.code};", f"{indent}}}"]
         return [f"{indent}{self.assignment_or_expr(toks)};"]
 
     def _cond(self, e: Expr) -> str:
@@ -745,6 +756,8 @@ class RuleTranslator:
                     rhs_code = f"FString({rhs_code})"
                 if lhs.setter is None and lhs.code.endswith("()"):
                     raise Unsupported("asignación a propiedad con lógica")
+                if t.text == "%=" and lhs.setter is None and "float" in (lhs.type, rhs.type):
+                    return f"{lhs.code} = FMath::Fmod({lhs.code}, {rhs_code})"
                 if lhs.setter is not None:
                     if t.text == "=":
                         return lhs.setter(rhs_code)
@@ -777,6 +790,11 @@ class RuleTranslator:
     def expression(self, expected: str | None = None) -> Expr:
         """Traduce todos los tokens restantes como una expresión (operadores pasan tal cual)."""
         parts: list[str] = []
+        ptypes: list[str | None] = []
+
+        def add(code: str, typ: str | None = None) -> None:
+            parts.append(code)
+            ptypes.append(typ)
         last_type: str | None = None
         setter = None
         types_seen: list[str | None] = []
@@ -789,17 +807,17 @@ class RuleTranslator:
                 continue
             if t.kind == "str":
                 self.next()
-                parts.append(self.string_literal(t.text))
+                add(self.string_literal(t.text), "string")
                 last_type = "string"
                 types_seen.append("string")
             elif t.kind == "chr":
                 self.next()
-                parts.append("TEXT(" + t.text + ")")
+                add("TEXT(" + t.text + ")", "char")
                 last_type = "char"
             elif t.kind == "num":
                 self.next()
-                parts.append(self.number(t.text))
                 last_type = "float" if re.search(r"[.fFdDeE]", t.text) else "int"
+                add(self.number(t.text), last_type)
                 types_seen.append(last_type)
             elif t.kind == "id":
                 if t.text == "new":
@@ -816,7 +834,7 @@ class RuleTranslator:
                         e = Expr(f"{'' if op == '==' else '!'}{operand}.IsEmpty()", "bool")
                 else:
                     e = self.chain(expected)
-                parts.append(e.code)
+                add(e.code, e.type)
                 last_type = e.type
                 setter = e.setter
                 types_seen.append(e.type)
@@ -829,11 +847,11 @@ class RuleTranslator:
                     inner = self.unary(cs)
                     k = self.ctx.kind(cs)
                     if k in ("number",):
-                        parts.append(f"static_cast<{self.ctx.cpp_local(cs)}>({inner.code})")
+                        add(f"static_cast<{self.ctx.cpp_local(cs)}>({inner.code})", cs)
                     elif k in ("pcomponent", "ucomponent", "pobject", "uasset"):
-                        parts.append(f"Cast<{self.ctx.cpp_class(cs)}>({inner.code})")
+                        add(f"Cast<{self.ctx.cpp_class(cs)}>({inner.code})", cs)
                     elif k == "penum":
-                        parts.append(f"static_cast<{self.ctx.cpp_local(cs)}>({inner.code})")
+                        add(f"static_cast<{self.ctx.cpp_local(cs)}>({inner.code})", cs)
                     else:
                         raise Unsupported(f"cast a {cs}")
                     last_type = cs
@@ -846,7 +864,7 @@ class RuleTranslator:
                     setter = None
                     # postfijos tras paréntesis: (a).x
                     e = self.postfix(Expr(code, inner.type))
-                    parts.append(e.code)
+                    add(e.code, e.type)
                     last_type = e.type
                     types_seen.append(last_type)
             elif t.kind == "op":
@@ -855,11 +873,17 @@ class RuleTranslator:
                     raise Unsupported("operador ?.")
                 if t.text == "+" and "string" in types_seen:
                     raise Unsupported("concatenación de cadenas")
-                parts.append(t.text)
-                if t.text in ("?", ":"):
-                    pass
+                add(t.text)
             else:
                 raise Unsupported(f"token {t.text!r}")
+        # C# admite % entre floats; en C++ hay que usar FMath::Fmod
+        i = 1
+        while i < len(parts) - 1:
+            if parts[i] == "%" and ("float" in (ptypes[i - 1], ptypes[i + 1]) or "double" in (ptypes[i - 1], ptypes[i + 1])):
+                parts[i - 1:i + 2] = [f"FMath::Fmod({parts[i - 1]}, {parts[i + 1]})"]
+                ptypes[i - 1:i + 2] = ["float"]
+            else:
+                i += 1
         code = self._join(parts)
         # el tipo de una expresión con operadores: el del primer operando conocido
         typ = next((x for x in types_seen if x), None) if len(types_seen) > 1 else last_type
@@ -990,9 +1014,38 @@ class RuleTranslator:
         return f"FString::Printf(TEXT(\"{''.join(fmt)}\"), {', '.join(args)})" if args else f"TEXT(\"{''.join(fmt)}\")"
 
     # --- new ----------------------------------------------------------------------------------
+    def array_literal(self, elem_cs: str | None) -> Expr:
+        """``{ a, b, c }`` tras ``new[]`` o ``new T[]``."""
+        self.expect("{")
+        toks = self.collect_until({"}"}, consume=True)
+        groups: list[list[Tok]] = [[]]
+        depth = 0
+        for t in toks:
+            if t.text in "([{":
+                depth += 1
+            elif t.text in ")]}":
+                depth -= 1
+            if depth == 0 and t.text == ",":
+                groups.append([])
+            else:
+                groups[-1].append(t)
+        items = [self.expr_tokens(g) for g in groups if g]
+        if elem_cs is None:
+            elem_cs = next((i.type for i in items if i.type), None)
+            if elem_cs is None:
+                raise Unsupported("new[] sin tipo deducible")
+        decl = self.ctx.cpp_local(f"{elem_cs}[]")
+        return Expr(f"{decl}{{{', '.join(i.code for i in items)}}}", f"{elem_cs}[]")
+
     def new_expr(self) -> Expr:
         self.next()  # new
+        if self.at("["):
+            self.next()
+            self.expect("]")
+            return self.array_literal(None)
         cs = self.read_type()
+        if cs.endswith("[]"):
+            return self.array_literal(cs[:-2])
         self.expect("(")
         args = self.args_until_close()
         k = self.ctx.kind(cs)
@@ -1016,7 +1069,15 @@ class RuleTranslator:
             if not args:
                 return Expr(f"{COMPAT}::NewGameObject(this, TEXT(\"GameObject\"))", "GameObject")
         if k == "pobject" and self.ctx.types[base].kind == "object":
-            return Expr(f"NewObject<{self.ctx.types[base].cpp_name}>(this)", cs)
+            if "static" in self.ctx.method.modifiers or self.ctx.owner_kind in ("library", "struct"):
+                raise Unsupported("new de un UObject sin 'this'")
+            cpp = self.ctx.types[base].cpp_name
+            if not args:
+                return Expr(f"NewObject<{cpp}>(this)", cs)
+            ctor = self.ctx.types[base].cs_type
+            if ctor is None or not any(m.is_constructor and m.params.strip() for m in ctor.methods):
+                raise Unsupported(f"new {base} con argumentos sin constructor conocido")
+            return Expr(f"NewObject<{cpp}>(this)->Construct({', '.join(a.code for a in args)})", cs)
         raise Unsupported(f"new {cs}")
 
     @staticmethod
@@ -1076,7 +1137,9 @@ class RuleTranslator:
                 raise Unsupported(f"campo de tipo sin equivalente: {ctx.field_types[name]}")
             e = Expr(ctx.member_cpp(ctx.owner.name, name), ctx.typed(ctx.field_types[name], name))
         elif name in ctx.method_returns or name in ("Invoke", "Instantiate", "Destroy", "GetComponent",
-                                                     "GetComponents", "GetComponentInChildren", "print"):
+                                                     "GetComponents", "GetComponentInChildren", "print",
+                                                     "FindObjectsByType", "FindObjectsOfType",
+                                                     "FindFirstObjectByType", "FindObjectOfType", "FindAnyObjectByType"):
             e = self.own_call(name)
         elif name in ctx.types:
             e = self.project_static(name)
@@ -1149,6 +1212,15 @@ class RuleTranslator:
             cs = self.generic_arg()
             self.call_args()
             return Expr(f"GetComponents<{ctx.cpp_class(cs)}>()", f"List<{cs}>")
+        if name in ("FindObjectsByType", "FindObjectsOfType", "FindFirstObjectByType", "FindObjectOfType",
+                    "FindAnyObjectByType"):
+            cs = self.generic_arg()
+            self.expect("(")
+            self.collect_until({")"}, consume=True)  # FindObjectsSortMode etc. se ignoran sin traducir
+            cls = ctx.cpp_class(cs)
+            if name.startswith("FindObjects"):
+                return Expr(f"{COMPAT}::FindObjectsOfType<{cls}>(this)", f"{cs}[]")
+            return Expr(f"{COMPAT}::FindFirstObjectOfType<{cls}>(this)", cs)
         if name == "Instantiate":
             return self.instantiate(self.call_args())
         if name == "Destroy":

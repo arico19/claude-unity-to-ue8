@@ -528,6 +528,18 @@ class CppGenerator:
         method_lines: list[str] = []
         msg_lines: list[str] = []
         for m in t.methods:
+            if m.is_constructor and m.params.strip() and kind in ("object", "data_asset"):
+                # ``new Foo(a, b)`` en C# -> ``NewObject<UFoo>(this)->Construct(a, b)`` (ver body_rules.new_expr)
+                params_decl, params_def, _ok = self._params(m.params)
+                method_lines.append(f"\t/** Constructor C# {m.name}({m.params}) */")
+                method_lines.append(f"\t{cpp}* Construct({params_decl});")
+                fake = CSMethod("Construct", t.name, m.params, [x for x in m.modifiers if x != "static"], [], m.body)
+                body = self._method_body(fake, f"{cpp}* {{cls}}::Construct({params_def})", cpp, None, t, kind, field_map)
+                body = body.rstrip()
+                assert body.endswith("}")
+                body = body[:-1].rstrip("\n").replace("\treturn {};", "").rstrip("\n") + "\n\treturn this;\n}"
+                cpp_defs.append(body)
+                continue
             if m.is_constructor:
                 method_lines.append(f"\t// TODO(unity2ue): constructor C# {m.name}({m.params}) -> usar inicialización de UPROPERTY/PostInitProperties")
                 continue
