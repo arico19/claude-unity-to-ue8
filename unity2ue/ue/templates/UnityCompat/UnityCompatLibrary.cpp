@@ -1,6 +1,8 @@
 #include "UnityCompat/UnityCompatLibrary.h"
+#include "UnityCompat/UnityGameObject.h"
 
 #include "Engine/Engine.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
@@ -159,4 +161,90 @@ bool UUnityCompatLibrary::SetComponentAttachSocket(UBlueprint* Blueprint, FName 
 	}
 #endif
 	return false;
+}
+
+void UUnityCompatLibrary::SetActive(AActor* Actor, bool bActive)
+{
+	if (!Actor)
+	{
+		return;
+	}
+	if (AUnityGameObject* Go = Cast<AUnityGameObject>(Actor))
+	{
+		Go->SetActive(bActive);
+		return;
+	}
+	Actor->SetActorHiddenInGame(!bActive);
+	Actor->SetActorEnableCollision(bActive);
+	Actor->SetActorTickEnabled(bActive);
+	for (UActorComponent* Component : Actor->GetComponents())
+	{
+		if (bActive)
+		{
+			Component->Activate();
+		}
+		else
+		{
+			Component->Deactivate();
+		}
+	}
+}
+
+static const TCHAR* UnityPrefsSection = TEXT("UnityPlayerPrefs");
+
+int32 UUnityCompatLibrary::PrefsGetInt(const FString& Key, int32 Default)
+{
+	int32 Value = Default;
+	GConfig->GetInt(UnityPrefsSection, *Key, Value, GGameUserSettingsIni);
+	return Value;
+}
+
+void UUnityCompatLibrary::PrefsSetInt(const FString& Key, int32 Value)
+{
+	GConfig->SetInt(UnityPrefsSection, *Key, Value, GGameUserSettingsIni);
+}
+
+float UUnityCompatLibrary::PrefsGetFloat(const FString& Key, float Default)
+{
+	float Value = Default;
+	GConfig->GetFloat(UnityPrefsSection, *Key, Value, GGameUserSettingsIni);
+	return Value;
+}
+
+void UUnityCompatLibrary::PrefsSetFloat(const FString& Key, float Value)
+{
+	GConfig->SetFloat(UnityPrefsSection, *Key, Value, GGameUserSettingsIni);
+}
+
+FString UUnityCompatLibrary::PrefsGetString(const FString& Key, const FString& Default)
+{
+	FString Value = Default;
+	GConfig->GetString(UnityPrefsSection, *Key, Value, GGameUserSettingsIni);
+	return Value;
+}
+
+void UUnityCompatLibrary::PrefsSetString(const FString& Key, const FString& Value)
+{
+	GConfig->SetString(UnityPrefsSection, *Key, *Value, GGameUserSettingsIni);
+}
+
+bool UUnityCompatLibrary::PrefsHasKey(const FString& Key)
+{
+	FString Value;
+	return GConfig->GetString(UnityPrefsSection, *Key, Value, GGameUserSettingsIni);
+}
+
+void UUnityCompatLibrary::PrefsDeleteKey(const FString& Key)
+{
+	GConfig->RemoveKey(UnityPrefsSection, *Key, GGameUserSettingsIni);
+}
+
+void UUnityCompatLibrary::PrefsDeleteAll()
+{
+	GConfig->EmptySection(UnityPrefsSection, GGameUserSettingsIni);
+}
+
+void UUnityCompatLibrary::PrefsSave()
+{
+	GConfig->Flush(false, GGameUserSettingsIni);
 }

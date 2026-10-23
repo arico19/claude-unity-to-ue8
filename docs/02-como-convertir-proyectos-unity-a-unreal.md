@@ -75,6 +75,15 @@ mallas, luces, cámaras, colisiones, física, audio, materiales Standard y URP, 
 sprites, textos 3D (TextMeshPro), ScriptableObjects como DataAssets, input, animaciones `.anim` y
 animaciones Humanoid (Mixamo) redirigidas a cada personaje.
 
+**Scripts C#:** la estructura de cada script (clase, campos, enums, métodos) se genera siempre. Los cuerpos
+de los métodos y los getters de las propiedades los traduce un **traductor de reglas** cuando usan la API
+habitual de Unity (transform, Vector3/Quaternion, Mathf, listas, eventos, Instantiate/Destroy, GetComponent,
+Invoke, Debug.Log, PlayerPrefs, cadenas interpoladas, switch...). Cada método se traduce entero o se deja
+como TODO con el C# original; la cabecera de cada fichero dice cuántos quedan pendientes y `report.md`
+resume el total. El código traducido trabaja en metros y ejes de Unity y convierte al leer o escribir en el
+actor de UE (`UnityToUnrealLocation`, `UnrealToUnityLocation`...). Los pendientes (corrutinas, LINQ, lambdas,
+Animator, UI...) se traducen con `/convertir-scripts` (agentes). En in-coming las reglas cubren el 74%.
+
 **Manual o asistido** (aparece en `report.md`):
 
 - La interfaz uGUI (canvas, botones, textos de pantalla): recrearla en UMG.

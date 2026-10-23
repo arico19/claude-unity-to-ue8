@@ -48,7 +48,7 @@ VALUE_TYPES: dict[str, tuple[str, bool, str | None]] = {
     "TimeSpan": ("FTimespan", True, None),
     "DateTime": ("FDateTime", True, None),
     "UnityEvent": ("FUnityEvent", True, "UnityCompat/UnityBehaviour.h"),
-    "Action": ("FSimpleDelegate", False, None),
+    "Action": ("FUnityEvent", True, "UnityCompat/UnityBehaviour.h"),
 }
 
 # Tipo UnityEngine.Object -> (clase UE, include)
@@ -138,6 +138,9 @@ class ProjectType:
 class TypeMapper:
     def __init__(self, project_types: dict[str, ProjectType] | None = None) -> None:
         self.project_types = project_types or {}
+        # Delegados dinámicos con parámetros usados en el proyecto: nombre -> tipos C++ de los parámetros.
+        # Se declaran todos en Unity/UnityDelegates.h (ver CppGenerator.delegates_header).
+        self.delegates: dict[str, list[str]] = {}
 
     def map(self, cs_type: str, field_name: str = "") -> CppType:
         t = re.sub(r"\s+", "", cs_type.strip())
@@ -156,6 +159,20 @@ class TypeMapper:
             if base in CONTAINERS:
                 inner = [self.map(a, field_name) for a in args]
                 return self._container(CONTAINERS[base], inner, None)
+            if base in ("UnityEvent", "Action") and 1 <= len(args) <= 4:
+                inner = [self.map(a) for a in args]
+                if all(i.uproperty and not i.decl.startswith(("TArray", "TMap", "TSet", "F") + ("FUnityEvent",))
+                       or i.decl in ("FString", "FVector", "FQuat", "FLinearColor", "FVector2D", "FName", "FRotator")
+                       or (i.uproperty and i.decl.startswith("E")) for i in inner) and not any("no mapeado" in (i.note or "") for i in inner):
+                    params = [_delegate_param(i) for i in inner]
+                    name = "FUnityEvent_" + "_".join(_delegate_suffix(p) for p in params)
+                    self.delegates.setdefault(name, params)
+                    includes = {"Unity/UnityDelegates.h"}
+                    forward: set[str] = set()
+                    for i in inner:
+                        includes |= i.includes
+                        forward |= i.forward
+                    return CppType(name, name, True, includes, forward)
             if base in ("UnityEvent", "Action", "Func"):
                 return CppType("FUnityEvent", "FUnityEvent", True, {"UnityCompat/UnityBehaviour.h"},
                                note=f"{cs_type}: evento con parámetros -> declarar un delegate dinámico propio")
@@ -209,6 +226,18 @@ class TypeMapper:
         decl = f"{kind}<{args}>"
         return CppType(decl, f"const {decl}&", ok, includes, forward,
                        note=note or next((i.note for i in inner if i.note), None))
+
+
+def _delegate_param(ct: CppType) -> str:
+    """Tipo C++ de un parámetro de delegate dinámico (punteros a objeto, no TObjectPtr)."""
+    if ct.is_object:
+        return ct.param  # UFoo*
+    return ct.decl
+
+
+def _delegate_suffix(param: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", param.replace("*", "Ptr").replace("int32", "Int").replace("float", "Float")
+                  .replace("bool", "Bool").replace("double", "Double").replace("int64", "Int64").replace("uint8", "Byte"))
 
 
 def _split_generic(text: str) -> list[str]:

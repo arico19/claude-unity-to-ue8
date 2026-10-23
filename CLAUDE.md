@@ -14,7 +14,9 @@ La conversión tiene tres capas:
    - `convert/` traduce a un formato intermedio JSON neutral:
      `hierarchy.py` (escenas/prefabs → árboles de nodos), `components.py` (un conversor por
      classID de Unity), `materials.py`, `animators.py`, `coords.py` (cambio de ejes/unidades),
-     `csharp.py` (parser C#) + `cpp_gen.py`/`type_map.py` (esqueletos C++).
+     `csharp.py` (parser C#) + `cpp_gen.py`/`type_map.py` (esqueletos C++) + `body_rules.py`
+     (traductor de reglas de cuerpos de métodos y getters: todo o nada por método, en unidades/ejes de
+     Unity con conversión en el borde; lo que no cubre queda como TODO con el motivo en `ScriptPlan.rule_reasons`).
    - `ue/project_gen.py` genera el `.uproject`, el módulo C++ y `Config/*.ini`.
    - `pipeline.py` orquesta todo; `cli.py` expone `analyze`, `convert`, `scripts`.
 2. **Scripts del editor de Unreal (`unity2ue/ue_editor/unity2ue_import/`)** — se copian a

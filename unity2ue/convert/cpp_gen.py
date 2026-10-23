@@ -18,11 +18,13 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from ..naming import cpp_property_name, to_pascal
+from .body_rules import RuleResult, getter_name, translate_method, translate_property
 from .csharp import CSField, CSFile, CSMethod, CSType
 from .type_map import ProjectType, TypeMapper, cpp_default
 
 STATUS_STUB = "UNITY2UE_STATUS: STUB"
 STATUS_TRANSLATED = "UNITY2UE_STATUS: TRANSLATED"
+RULES_MARK = "unity2ue: traducido por reglas desde C#"
 
 MONO_BASES = {"MonoBehaviour", "NetworkBehaviour", "Behaviour", "StateMachineBehaviour"}
 SO_BASES = {"ScriptableObject"}
@@ -106,6 +108,9 @@ class ScriptPlan:
     cpp_name: str  # sin prefijo
     header_rel: str  # p.ej. "Unity/Gameplay/PlayerController.h"
     field_maps: dict[str, dict[str, str]] = field(default_factory=dict)  # clase -> {unity_field: CppName}
+    rule_translated: int = 0  # métodos traducidos por reglas (body_rules)
+    rule_stub: int = 0  # métodos que quedan como TODO
+    rule_reasons: list = field(default_factory=list)  # (clase, método, motivo)
 
 
 def _is_editor_path(path: str) -> bool:
@@ -256,6 +261,13 @@ def _by_value(t: str) -> str:
 
 class CppGenerator:
     def __init__(self, module_name: str, project_types: dict[str, ProjectType]) -> None:
+        self._param_map: dict[str, tuple[str, str]] = {}
+        self._plan: ScriptPlan | None = None
+        # Métodos suscritos a eventos (``evento += Metodo``): AddDynamic exige que sean UFUNCTION.
+        self._handlers: set[str] = set()
+        for pt in project_types.values():
+            if pt.cs_type is not None:
+                self._handlers |= {to_pascal(h) for h in re.findall(r"[+-]=\s*(\w+)\s*;", pt.cs_type.source)}
         self.module = module_name
         self.api = f"{module_name.upper()}_API"
         self.types = project_types
@@ -276,8 +288,9 @@ class CppGenerator:
         from .csharp import _split_top
 
         decl_parts, def_parts, ok = [], [], True
+        self._param_map = {}
         for raw in _split_top(params, ","):
-            p = re.sub(r"\[[^\]]*\]", "", raw).strip()
+            p = re.sub(r"^\s*(?:\[[^\]]*\]\s*)+", "", raw).strip()  # atributos [X] delante, no T[]
             if not p:
                 continue
             default = None
@@ -289,6 +302,7 @@ class CppGenerator:
             pname = to_pascal(tokens[-1].lstrip("@"))
             if pname in self._members:
                 pname = f"In{pname}"
+            self._param_map[tokens[-1].lstrip("@")] = (pname, ptype)
             ct = self.mapper.map(ptype, pname)
             self._includes |= ct.includes
             self._forwards |= ct.forward
@@ -366,16 +380,27 @@ class CppGenerator:
                               else "\tUPROPERTY(Transient, BlueprintReadWrite, Category = \"Unity\")")
                 public.append(f"\t{ct.decl} {name}{' = ' + default if default else ''};\n")
             else:
-                public.append("\t// TODO(unity2ue): propiedad C# con lógica -> getter/setter:")
-                public.append(_comment_block(p.source.strip()))
-                public.append(f"\t{_by_value(ct.param)} Get{name}() const;\n")
+                is_static = "static" in p.source.split("{")[0].split()
+                public.append("\t// Propiedad C# con lógica -> getter (el setter, si lo había, queda sin traducir):")
+                public.append(_comment_block(p.source.strip().splitlines()[0]))
+                public.append(f"\t{'static ' if is_static else ''}{_by_value(ct.param)} {getter_name(t, p.name)}()"
+                              f"{'' if is_static else ' const'};\n")
         return public, private
 
     def _method_decl(self, m: CSMethod, kind: str, overrides: bool, static_class: bool) -> tuple[str, str, str | None]:
         """Devuelve (declaración, firma para la definición, nota)."""
+        from .csharp import _split_top
         if kind == "component" and m.name in UNITY_MESSAGES:
             sig = UNITY_MESSAGES[m.name]
             ret, rest = sig.split(" ", 1)
+            self._param_map = {}
+            cs_params = [p.split()[-1].lstrip("@") for p in _split_top(m.params, ",") if p.strip()]
+            cpp_params = re.findall(r"(\w+)\s*[,)]", rest.split("(", 1)[1]) if "(" in rest else []
+            if m.name.startswith(("OnTrigger", "OnCollision")) and cs_params and cpp_params:
+                self._param_map[cs_params[0]] = (cpp_params[0], "GameObject")
+            elif cs_params and len(cs_params) == len(cpp_params):
+                for cs_p, cpp_p in zip(cs_params, cpp_params, strict=False):
+                    self._param_map[cs_p] = (cpp_p, "float")
             return f"\tvirtual {sig} override;", f"{ret} {{cls}}::{rest}", None
         ret_ct = self.mapper.map(m.return_type or "void")
         self._includes |= ret_ct.includes
@@ -390,7 +415,7 @@ class CppGenerator:
         if name in RESERVED_MEMBERS and kind in ("component", "data_asset", "object"):
             name = f"{name}Unity"
         is_static = "static" in m.modifiers or static_class
-        ufunc = ok and ret_ct.uproperty and "private" not in m.modifiers and kind != "struct"
+        ufunc = ok and ret_ct.uproperty and ("private" not in m.modifiers or name in self._handlers) and kind != "struct"
         # UHT: un override de un UFUNCTION no puede llevar UFUNCTION(), ni puede haber sobrecargas.
         if "override" in m.modifiers or name in self._ufuncs:
             ufunc = False
@@ -406,8 +431,25 @@ class CppGenerator:
         lines.append(f"\t{prefix}{ret} {name}({params_decl}){suffix};")
         return "\n".join(lines), f"{ret} {{cls}}::{name}({params_def})", note
 
-    def _method_body(self, m: CSMethod, sig: str, owner: str, note: str | None) -> str:
+    def _method_body(self, m: CSMethod, sig: str, owner: str, note: str | None, t: CSType | None = None,
+                     kind: str | None = None, field_map: dict[str, str] | None = None) -> str:
         head = sig.replace("{cls}", owner)
+        if t is not None and kind is not None and not note:
+            res = translate_method(t, kind, owner, m, self.mapper, self.types, field_map or {}, dict(self._param_map))
+            if res.ok:
+                self._includes |= res.includes
+                if self._plan is not None:
+                    self._plan.rule_translated += 1
+                body = [head, "{", f"\t// {RULES_MARK}:", _comment_block(m.body or "(vacío)")]
+                body += res.lines
+                body.append("}")
+                return "\n".join(body)
+            if self._plan is not None:
+                self._plan.rule_reasons.append((t.name, m.name, res.reason))
+        elif note and self._plan is not None:
+            self._plan.rule_reasons.append((t.name if t is not None else owner, m.name, "corrutina" if "Corrutina" in note else note))
+        if self._plan is not None:
+            self._plan.rule_stub += 1
         body = [head, "{", f"\t// TODO(unity2ue): traducir el cuerpo original C# de {m.name}:"]
         if note:
             body.append(f"\t// NOTE: {note}")
@@ -454,7 +496,7 @@ class CppGenerator:
                     continue
                 decl, sig, note = self._method_decl(m, kind, False, False)
                 out.append(decl.replace('\tUFUNCTION(BlueprintCallable, Category = "Unity")\n', ""))
-                cpp_defs.append(self._method_body(m, sig, cpp, note))
+                cpp_defs.append(self._method_body(m, sig, cpp, note, t, kind, field_map))
             out.append("};\n")
             return "\n".join(out)
 
@@ -494,15 +536,27 @@ class CppGenerator:
             decl, sig, note = self._method_decl(m, kind, project_base is not None, kind == "library")
             (msg_lines if (kind == "component" and m.name in UNITY_MESSAGES) else method_lines).append(decl)
             if sig:
-                cpp_defs.append(self._method_body(m, sig, cpp, note))
+                cpp_defs.append(self._method_body(m, sig, cpp, note, t, kind, field_map))
         for p in t.properties:
             if not _AUTO_PROP.search(p.source) or "=>" in p.source.split("{")[0]:
                 ct = self.mapper.map(p.type, p.name)
-                name = to_pascal(p.name)
-                cpp_defs.append(
-                    f"{_by_value(ct.param)} {cpp}::Get{name}() const\n{{\n\t// TODO(unity2ue): traducir propiedad C#:\n"
-                    f"{_comment_block(p.source.strip())}\n\treturn {{}};\n}}"
-                )
+                is_static = "static" in p.source.split("{")[0].split()
+                head = f"{_by_value(ct.param)} {cpp}::{getter_name(t, p.name)}(){'' if is_static else ' const'}"
+                res: RuleResult = translate_property(t, kind, cpp, p, self.mapper, self.types, field_map)
+                if res.ok:
+                    self._includes |= res.includes
+                    if self._plan is not None:
+                        self._plan.rule_translated += 1
+                    cpp_defs.append("\n".join([head, "{", f"\t// {RULES_MARK}:", _comment_block(p.source.strip()),
+                                                *res.lines, "}"]))
+                else:
+                    if self._plan is not None:
+                        self._plan.rule_stub += 1
+                        self._plan.rule_reasons.append((t.name, p.name, res.reason))
+                    cpp_defs.append(
+                        f"{head}\n{{\n\t// TODO(unity2ue): traducir propiedad C#:\n"
+                        f"{_comment_block(p.source.strip())}\n\treturn {{}};\n}}"
+                    )
         if method_lines:
             out.append("")
             out += method_lines
@@ -517,11 +571,38 @@ class CppGenerator:
         return "\n".join(out)
 
     # ----------------------------------------------------------- fichero
+    def delegates_header(self) -> str | None:
+        """``Unity/UnityDelegates.h``: delegados dinámicos para los ``Action<T>``/``UnityEvent<T>`` del proyecto."""
+        if not self.mapper.delegates:
+            return None
+        words = {1: "OneParam", 2: "TwoParams", 3: "ThreeParams", 4: "FourParams"}
+        lines = ["// Generado por unity2ue: eventos C# con parámetros (Action<T>, UnityEvent<T>) -> delegados dinámicos.",
+                 "#pragma once", "", '#include "CoreMinimal.h"']
+        includes: set[str] = set()
+        forwards: set[str] = set()
+        for params in self.mapper.delegates.values():
+            for p in params:
+                if p.endswith("*"):
+                    forwards.add(p.rstrip("*").strip())
+        for pt in self.types.values():
+            if pt.header and pt.cpp_name in forwards:
+                includes.add(pt.header)
+        lines += [f'#include "{i}"' for i in sorted(includes)]
+        lines += [f"class {f};" for f in sorted(forwards) if f not in {pt.cpp_name for pt in self.types.values() if pt.header}]
+        lines.append("")
+        for name, params in sorted(self.mapper.delegates.items()):
+            args = ", ".join(f"{p}, Arg{i}" for i, p in enumerate(params))
+            lines.append(f"DECLARE_DYNAMIC_MULTICAST_DELEGATE_{words[len(params)]}({name}, {args});")
+        return "\n".join(lines) + "\n"
+
     def generate(self, plan: ScriptPlan) -> tuple[str, str]:
         """Devuelve (contenido .h, contenido .cpp)."""
         includes: set[str] = set()
         forwards: set[str] = set()
         self._includes, self._forwards = includes, forwards
+        self._plan = plan
+        plan.rule_translated = plan.rule_stub = 0
+        plan.rule_reasons = []
         sections: list[str] = []
         cpp_defs: list[str] = []
         file_types = plan.file.all_types()
@@ -543,11 +624,16 @@ class CppGenerator:
         header_name = PurePosixPath(plan.header_rel).stem
         own_includes = sorted(i for i in includes if i and i != plan.header_rel)
         own_forwards = sorted(f for f in forwards if f not in {pt.cpp_name for _, _, pt in typed})
+        all_rules = plan.rule_stub == 0 and plan.rule_translated > 0
+        status = STATUS_TRANSLATED if all_rules else STATUS_STUB
         h = [
             f"// Generado por unity2ue desde: {plan.unity_path}",
-            f"// {STATUS_STUB}",
-            "// Los métodos contienen el C# original comentado. Tradúcelos con el agente",
-            "// `csharp-to-cpp` de Claude Code y cambia el estado a TRANSLATED.",
+            f"// {status}",
+            *([f"// Todos los métodos ({plan.rule_translated}) traducidos por reglas; revisar si no compila."]
+              if all_rules else [
+                f"// Métodos traducidos por reglas: {plan.rule_translated}; pendientes (TODO): {plan.rule_stub}.",
+                "// Los pendientes contienen el C# original comentado. Tradúcelos con el agente",
+                "// `csharp-to-cpp` de Claude Code y cambia el estado a TRANSLATED."]),
             "#pragma once",
             "",
             '#include "CoreMinimal.h"',
@@ -560,7 +646,7 @@ class CppGenerator:
         h += sections
         c = [
             f"// Generado por unity2ue desde: {plan.unity_path}",
-            f"// {STATUS_STUB}",
+            f"// {status}",
             f'#include "{plan.header_rel}"',
             "",
         ]

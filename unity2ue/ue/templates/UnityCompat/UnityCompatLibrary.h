@@ -30,6 +30,49 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Unity|Math")
 	static FVector UnityToUnrealDirection(FVector UnityVector) { return FVector(UnityVector.Z, UnityVector.X, UnityVector.Y); }
 
+	/** Inversas: espacio UE -> espacio Unity (el código traducido por reglas trabaja en metros y ejes de Unity). */
+	UFUNCTION(BlueprintPure, Category = "Unity|Math")
+	static FVector UnrealToUnityLocation(FVector UnrealVector) { return FVector(UnrealVector.Y, UnrealVector.Z, UnrealVector.X) / 100.0; }
+	UFUNCTION(BlueprintPure, Category = "Unity|Math")
+	static FVector UnrealToUnityDirection(FVector UnrealVector) { return FVector(UnrealVector.Y, UnrealVector.Z, UnrealVector.X); }
+	/** Escalas: sólo cambio de ejes, sin unidades. */
+	static FVector UnityToUnrealScale(const FVector& V) { return FVector(V.Z, V.X, V.Y); }
+	static FVector UnrealToUnityScale(const FVector& V) { return FVector(V.Y, V.Z, V.X); }
+	/** Cuaterniones: ambos sistemas son de mano izquierda, basta permutar componentes (x,y,z,w) -> (z,x,y,w). */
+	static FQuat UnityToUnrealQuat(const FQuat& Q) { return FQuat(Q.Z, Q.X, Q.Y, Q.W); }
+	static FQuat UnrealToUnityQuat(const FQuat& Q) { return FQuat(Q.Y, Q.Z, Q.X, Q.W); }
+	/** Quaternion.LookRotation(forward, up) en espacio Unity (Z adelante, Y arriba). */
+	static FQuat LookRotation(const FVector& UnityForward, const FVector& UnityUp = FVector(0.f, 1.f, 0.f))
+	{
+		return UnityForward.IsNearlyZero() ? FQuat::Identity : FRotationMatrix::MakeFromZY(UnityForward, UnityUp).ToQuat();
+	}
+
+	/** GameObject.SetActive(bool) para cualquier actor. */
+	UFUNCTION(BlueprintCallable, Category = "Unity")
+	static void SetActive(AActor* Actor, bool bActive);
+
+	/** PlayerPrefs: se guardan en la sección [UnityPlayerPrefs] de GameUserSettings.ini. */
+	UFUNCTION(BlueprintPure, Category = "Unity|PlayerPrefs")
+	static int32 PrefsGetInt(const FString& Key, int32 Default = 0);
+	UFUNCTION(BlueprintCallable, Category = "Unity|PlayerPrefs")
+	static void PrefsSetInt(const FString& Key, int32 Value);
+	UFUNCTION(BlueprintPure, Category = "Unity|PlayerPrefs")
+	static float PrefsGetFloat(const FString& Key, float Default = 0.f);
+	UFUNCTION(BlueprintCallable, Category = "Unity|PlayerPrefs")
+	static void PrefsSetFloat(const FString& Key, float Value);
+	UFUNCTION(BlueprintPure, Category = "Unity|PlayerPrefs")
+	static FString PrefsGetString(const FString& Key, const FString& Default = TEXT(""));
+	UFUNCTION(BlueprintCallable, Category = "Unity|PlayerPrefs")
+	static void PrefsSetString(const FString& Key, const FString& Value);
+	UFUNCTION(BlueprintPure, Category = "Unity|PlayerPrefs")
+	static bool PrefsHasKey(const FString& Key);
+	UFUNCTION(BlueprintCallable, Category = "Unity|PlayerPrefs")
+	static void PrefsDeleteKey(const FString& Key);
+	UFUNCTION(BlueprintCallable, Category = "Unity|PlayerPrefs")
+	static void PrefsDeleteAll();
+	UFUNCTION(BlueprintCallable, Category = "Unity|PlayerPrefs")
+	static void PrefsSave();
+
 	/** GameObject.FindWithTag */
 	UFUNCTION(BlueprintCallable, Category = "Unity", meta = (WorldContext = "WorldContextObject"))
 	static AActor* FindWithTag(const UObject* WorldContextObject, FName Tag);

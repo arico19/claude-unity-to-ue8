@@ -176,13 +176,26 @@ class Converter:
                     header=plan.header_rel,
                     field_map=plan.field_maps.get(main.name, {}),
                 )
+        if self.cfg.generate_cpp:
+            delegates = gen.delegates_header()
+            if delegates:
+                d_path = src_root / "Unity" / "UnityDelegates.h"
+                d_path.parent.mkdir(parents=True, exist_ok=True)
+                if not d_path.exists() or d_path.read_text("utf-8", errors="replace") != delegates:
+                    d_path.write_text(delegates, "utf-8")
+        rule_translated = sum(p.rule_translated for p in plans)
+        rule_total = rule_translated + sum(p.rule_stub for p in plans)
+        if rule_total:
+            self.ctx.info("scripts", f"Métodos traducidos por reglas: {rule_translated} de {rule_total} "
+                          f"({100 * rule_translated // rule_total}%); el resto queda como TODO para el agente.")
         pending = [q for q in queue if q["status"] == "stub"]
         if pending:
             self.ctx.manual("scripts", f"{len(pending)} scripts con cuerpos pendientes de traducir "
                                        "(usa /convertir-scripts en Claude Code).")
         data = {"module": self.cfg.module_name, "scripts": queue}
         _json(out / "Unity2UE" / "scripts.json", data)
-        return {"scripts": len(plans), "script_kinds": dict(kinds), "pending_translation": len(pending)}
+        return {"scripts": len(plans), "script_kinds": dict(kinds), "pending_translation": len(pending),
+                "methods_total": rule_total, "methods_rule_translated": rule_translated}
 
     def phase_prefabs(self, out: Path) -> dict[str, Any]:
         prefabs: dict[str, dict[str, Any]] = {}
