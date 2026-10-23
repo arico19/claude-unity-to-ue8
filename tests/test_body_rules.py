@@ -27,7 +27,7 @@ def test_rotator_fixture_update(sample_project):
     src = (sample_project / "Assets/Scripts/Rotator.cs").read_text()
     plan, h, c, _ = _one(src, "Assets/Scripts/Rotator.cs")
     assert plan.rule_translated == 1 and plan.rule_stub == 0
-    assert "UNITY2UE_STATUS: TRANSLATED" in h
+    assert "UNITY2UE_STATUS: RULES" in h
     assert "GetOwner()->GetRootComponent()->AddLocalRotation(" in c
     assert "FMath::DegreesToRadians(DegreesPerSecond * DeltaTime)" in c  # Time.deltaTime -> parámetro de Update
 
@@ -146,7 +146,7 @@ public class Man : MonoBehaviour { public int hp = 3; }
     assert "auto fx = Instantiate(FxPrefab, FVector::ZeroVector, FRotator::ZeroRotator);" in c
     assert "fx->GetRootComponent()->AttachToComponent(GetOwner()->GetRootComponent(), FAttachmentTransformRules::KeepWorldTransform);" in c
     assert "UUnityCompatLibrary::SetActive(fx, false);" in c
-    assert "UGameplayStatics::PlaySoundAtLocation(this, Clip," in c and '#include "Kismet/GameplayStatics.h"' in h
+    assert "UGameplayStatics::PlaySoundAtLocation(this, Clip," in c and '#include "Kismet/GameplayStatics.h"' in c
     assert "auto man = GetComponent<UMan>();" in c
     assert "DestroyActor(man->GetOwner(), 2.f);" in c
     assert "InvokeAfter(UUnityCompatLibrary::RandomRange(1.f, 3.f), [this]() { Spawn(); });" in c

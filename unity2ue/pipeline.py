@@ -148,7 +148,7 @@ class Converter:
                 c_path = h_path.with_suffix(".cpp")
                 existing = h_path.read_text("utf-8") if h_path.exists() else ""
                 if "UNITY2UE_STATUS: TRANSLATED" in existing:
-                    # Nunca sobrescribir código ya traducido por el agente o a mano.
+                    # Nunca sobrescribir código ya traducido por el agente o a mano (RULES sí se regenera).
                     entry["status"] = "translated"
                 else:
                     h_path.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +156,7 @@ class Converter:
                     for path, text in ((h_path, header), (c_path, cpp)):
                         if not path.exists() or path.read_text("utf-8", errors="replace") != text:
                             path.write_text(text, "utf-8")
-                    entry["status"] = "stub"
+                    entry["status"] = "rules" if "UNITY2UE_STATUS: RULES" in header else "stub"
                 entry["header"] = h_path.relative_to(out).as_posix()
                 entry["source"] = c_path.relative_to(out).as_posix()
             main = plan.main_type

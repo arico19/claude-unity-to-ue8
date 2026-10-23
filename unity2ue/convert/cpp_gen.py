@@ -24,6 +24,7 @@ from .type_map import ProjectType, TypeMapper, cpp_default
 
 STATUS_STUB = "UNITY2UE_STATUS: STUB"
 STATUS_TRANSLATED = "UNITY2UE_STATUS: TRANSLATED"
+STATUS_RULES = "UNITY2UE_STATUS: RULES"  # todo traducido por reglas: se regenera en cada conversión
 RULES_MARK = "unity2ue: traducido por reglas desde C#"
 
 MONO_BASES = {"MonoBehaviour", "NetworkBehaviour", "Behaviour", "StateMachineBehaviour"}
@@ -263,6 +264,7 @@ class CppGenerator:
     def __init__(self, module_name: str, project_types: dict[str, ProjectType]) -> None:
         self._param_map: dict[str, tuple[str, str]] = {}
         self._plan: ScriptPlan | None = None
+        self._cpp_includes: set[str] = set()
         # Métodos suscritos a eventos (``evento += Metodo``): AddDynamic exige que sean UFUNCTION.
         self._handlers: set[str] = set()
         for pt in project_types.values():
@@ -437,7 +439,7 @@ class CppGenerator:
         if t is not None and kind is not None and not note:
             res = translate_method(t, kind, owner, m, self.mapper, self.types, field_map or {}, dict(self._param_map))
             if res.ok:
-                self._includes |= res.includes
+                self._cpp_includes |= res.includes | self._headers_used(res.lines)
                 if self._plan is not None:
                     self._plan.rule_translated += 1
                 body = [head, "{", f"\t// {RULES_MARK}:", _comment_block(m.body or "(vacío)")]
@@ -544,7 +546,7 @@ class CppGenerator:
                 head = f"{_by_value(ct.param)} {cpp}::{getter_name(t, p.name)}(){'' if is_static else ' const'}"
                 res: RuleResult = translate_property(t, kind, cpp, p, self.mapper, self.types, field_map)
                 if res.ok:
-                    self._includes |= res.includes
+                    self._cpp_includes |= res.includes | self._headers_used(res.lines)
                     if self._plan is not None:
                         self._plan.rule_translated += 1
                     cpp_defs.append("\n".join([head, "{", f"\t// {RULES_MARK}:", _comment_block(p.source.strip()),
@@ -571,6 +573,15 @@ class CppGenerator:
         return "\n".join(out)
 
     # ----------------------------------------------------------- fichero
+    def _headers_used(self, lines: list[str]) -> set[str]:
+        """Cabeceras de los tipos del proyecto que aparecen en código traducido (para el .cpp)."""
+        text = "\n".join(lines)
+        out: set[str] = set()
+        for pt in self.types.values():
+            if pt.header and re.search(rf"\b{re.escape(pt.cpp_name)}\b", text):
+                out.add(pt.header)
+        return out
+
     def delegates_header(self) -> str | None:
         """``Unity/UnityDelegates.h``: delegados dinámicos para los ``Action<T>``/``UnityEvent<T>`` del proyecto."""
         if not self.mapper.delegates:
@@ -578,17 +589,13 @@ class CppGenerator:
         words = {1: "OneParam", 2: "TwoParams", 3: "ThreeParams", 4: "FourParams"}
         lines = ["// Generado por unity2ue: eventos C# con parámetros (Action<T>, UnityEvent<T>) -> delegados dinámicos.",
                  "#pragma once", "", '#include "CoreMinimal.h"']
-        includes: set[str] = set()
+        # Sólo declaraciones adelantadas: incluir cabeceras de componentes aquí crearía ciclos de inclusión.
         forwards: set[str] = set()
         for params in self.mapper.delegates.values():
             for p in params:
                 if p.endswith("*"):
                     forwards.add(p.rstrip("*").strip())
-        for pt in self.types.values():
-            if pt.header and pt.cpp_name in forwards:
-                includes.add(pt.header)
-        lines += [f'#include "{i}"' for i in sorted(includes)]
-        lines += [f"class {f};" for f in sorted(forwards) if f not in {pt.cpp_name for pt in self.types.values() if pt.header}]
+        lines += [f"class {f};" for f in sorted(forwards)]
         lines.append("")
         for name, params in sorted(self.mapper.delegates.items()):
             args = ", ".join(f"{p}, Arg{i}" for i, p in enumerate(params))
@@ -601,6 +608,7 @@ class CppGenerator:
         forwards: set[str] = set()
         self._includes, self._forwards = includes, forwards
         self._plan = plan
+        self._cpp_includes = set()
         plan.rule_translated = plan.rule_stub = 0
         plan.rule_reasons = []
         sections: list[str] = []
@@ -625,7 +633,7 @@ class CppGenerator:
         own_includes = sorted(i for i in includes if i and i != plan.header_rel)
         own_forwards = sorted(f for f in forwards if f not in {pt.cpp_name for _, _, pt in typed})
         all_rules = plan.rule_stub == 0 and plan.rule_translated > 0
-        status = STATUS_TRANSLATED if all_rules else STATUS_STUB
+        status = STATUS_RULES if all_rules else STATUS_STUB
         h = [
             f"// Generado por unity2ue desde: {plan.unity_path}",
             f"// {status}",
@@ -644,10 +652,17 @@ class CppGenerator:
         if own_forwards:
             h += [f"class {f};" for f in own_forwards] + [""]
         h += sections
+        cpp_includes = {"UnityCompat/UnityCompatLibrary.h", "UnityCompat/UnityBehaviour.h"} | self._cpp_includes
+        for f in own_forwards:
+            pt = next((pt for pt in self.types.values() if pt.cpp_name == f), None)
+            if pt is not None and pt.header:
+                cpp_includes.add(pt.header)
+        cpp_includes -= {plan.header_rel} | set(own_includes)
         c = [
             f"// Generado por unity2ue desde: {plan.unity_path}",
             f"// {status}",
             f'#include "{plan.header_rel}"',
+            *[f'#include "{i}"' for i in sorted(cpp_includes)],
             "",
         ]
         c += [d + "\n" for d in cpp_defs]

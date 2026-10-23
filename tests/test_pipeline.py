@@ -113,7 +113,7 @@ def test_scripts_queue_and_no_overwrite(converted, sample_project):
     assert queue["Assets/Scripts/PlayerController.cs"]["status"] == "stub"
     assert queue["Assets/Editor/SampleTool.cs"]["kind"] == "editor"
     header = converted.out_dir / queue["Assets/Scripts/Rotator.cs"]["header"]
-    translated = header.read_text().replace("UNITY2UE_STATUS: STUB", "UNITY2UE_STATUS: TRANSLATED") + "// mano\n"
+    translated = header.read_text().replace("UNITY2UE_STATUS: STUB", "UNITY2UE_STATUS: TRANSLATED").replace("UNITY2UE_STATUS: RULES", "UNITY2UE_STATUS: TRANSLATED") + "// mano\n"
     header.write_text(translated)
     convert_project(sample_project, converted.out_dir, ConversionConfig(project_name="Sample Game"), log=lambda _m: None)
     assert header.read_text() == translated

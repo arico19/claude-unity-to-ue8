@@ -135,8 +135,12 @@ class Ctx:
             return "gameobject"
         if base in TRANSFORM_LIKE:
             return "transform"
+        if base == "Prefab":
+            return "prefab"
         pt = self.types.get(base)
         if pt is not None:
+            if pt.header:
+                self.includes.add(pt.header)
             return {"component": "pcomponent", "struct": "pstruct", "enum": "penum", "data_asset": "pobject",
                     "object": "pobject", "library": "plibrary", "interface": "pobject"}.get(pt.kind, "unknown")
         if base in OBJECT_TYPES:
@@ -173,6 +177,15 @@ class Ctx:
             self.includes.add(inc)
             return cls
         raise Unsupported(f"GetComponent de tipo {cs}")
+
+    def typed(self, cs: str | None, name: str) -> str | None:
+        """Tipo C# efectivo de un campo/parámetro: ``Prefab<T>`` si en C++ se declaró como TSubclassOf (prefab)."""
+        if not cs:
+            return cs
+        ct = self.mapper.map(cs, name)
+        if ct.decl.startswith("TSubclassOf"):
+            return f"Prefab<{cs}>"
+        return cs
 
     def member_type(self, owner_cs: str, member: str) -> str | None:
         """Tipo C# del campo/propiedad/método ``member`` de un tipo del proyecto."""
@@ -219,7 +232,7 @@ class Ctx:
                     return f"{getter_name(t, member)}()"
             for m in t.methods:
                 if m.name == member:
-                    return to_pascal(member)
+                    return method_cpp_name(member, pt.kind if pt is not None else "object")
             for n in t.nested:
                 if n.name == member:
                     return self.types[n.name].cpp_name if n.name in self.types else n.name
@@ -228,6 +241,16 @@ class Ctx:
 
 
 _AUTO_PROP = re.compile(r"\{\s*(?:(?:public|private|protected|internal)\s+)?get\s*;")
+
+
+def method_cpp_name(name: str, owner_kind: str) -> str:
+    """Nombre C++ de un método del proyecto, con el mismo criterio que cpp_gen (``Tick`` -> ``TickUnity``)."""
+    from .cpp_gen import RESERVED_MEMBERS  # import tardío: cpp_gen importa este módulo
+
+    cpp = to_pascal(name)
+    if cpp in RESERVED_MEMBERS and owner_kind in ("component", "data_asset", "object"):
+        cpp += "Unity"
+    return cpp
 
 
 def getter_name(t: CSType, prop_name: str) -> str:
@@ -455,6 +478,8 @@ class RuleTranslator:
             raise Unsupported("new T[]")
         if re.search(r"\bnew\s*\{", masked):
             raise Unsupported("tipo anónimo")
+        if re.search(r"\[\s*\^", masked):
+            raise Unsupported("índice desde el final [^n]")
         if "?." in masked and not re.fullmatch(r"(?s).*", masked):
             raise Unsupported("operador ?.")
         for m in re.finditer(r"\?\.\s*(\w+)", masked):
@@ -741,7 +766,7 @@ class RuleTranslator:
         if len([p for p in m.params.split(",") if p.strip()]) != n_params:
             raise Unsupported("manejador con parámetros distintos a los del evento")
         fn = "AddDynamic" if op == "+=" else "RemoveDynamic"
-        return f"{lhs.code}.{fn}(this, &{self.ctx.owner_cpp}::{to_pascal(handler)})"
+        return f"{lhs.code}.{fn}(this, &{self.ctx.owner_cpp}::{method_cpp_name(handler, self.ctx.owner_kind)})"
 
     def expr_tokens(self, toks: list[Tok], expected: str | None = None) -> Expr:
         sub = RuleTranslator(self.ctx)
@@ -785,6 +810,10 @@ class RuleTranslator:
                 elif t.text == "null":
                     self.next()
                     e = Expr("nullptr", None)
+                    if len(parts) >= 2 and parts[-1] in ("==", "!=") and self.ctx.kind(types_seen[-1] if types_seen else None) == "array":
+                        op = parts.pop()
+                        operand = parts.pop()
+                        e = Expr(f"{'' if op == '==' else '!'}{operand}.IsEmpty()", "bool")
                 else:
                     e = self.chain(expected)
                 parts.append(e.code)
@@ -1022,7 +1051,7 @@ class RuleTranslator:
         elif name == "base":
             self.expect(".")
             m = self.next().text
-            e = Expr(f"Super::{to_pascal(m)}", ctx.method_returns.get(m))
+            e = Expr(f"Super::{method_cpp_name(m, ctx.owner_kind)}", ctx.method_returns.get(m))
         elif name in ("transform", "gameObject") and ctx.owner_kind == "component":
             if name == "transform" and self.at(".") and (self.peek(1) or Tok("", "")).text == "gameObject":
                 self.next()
@@ -1040,9 +1069,12 @@ class RuleTranslator:
             e = Expr(name, ctx.locals[name])
         elif name in ctx.params:
             cpp, cs = ctx.params[name]
-            e = Expr(cpp, cs)
+            e = Expr(cpp, ctx.typed(cs, cpp))
         elif name in ctx.field_types:
-            e = Expr(ctx.member_cpp(ctx.owner.name, name), ctx.field_types[name])
+            ct = ctx.mapper.map(ctx.field_types[name], name)
+            if ct.note and ("no mapeado" in ct.note or "genérico" in ct.note):
+                raise Unsupported(f"campo de tipo sin equivalente: {ctx.field_types[name]}")
+            e = Expr(ctx.member_cpp(ctx.owner.name, name), ctx.typed(ctx.field_types[name], name))
         elif name in ctx.method_returns or name in ("Invoke", "Instantiate", "Destroy", "GetComponent",
                                                      "GetComponents", "GetComponentInChildren", "print"):
             e = self.own_call(name)
@@ -1078,6 +1110,10 @@ class RuleTranslator:
                 e = Expr(f"{e.code}[{idx.code}]", _element_type(e.type))
             elif t.text in ("++", "--"):
                 self.next()
+                if e.setter is None and e.code.endswith("()"):
+                    raise Unsupported("++/-- sobre propiedad con lógica")
+                if e.setter is not None:
+                    raise Unsupported("++/-- sobre propiedad de Unity")
                 e = Expr(f"{e.code}{t.text}", e.type)
             else:
                 return e
@@ -1100,7 +1136,7 @@ class RuleTranslator:
             if len(args) != 2 or not args[0].code.startswith("TEXT("):
                 raise Unsupported("Invoke con argumentos raros")
             method = args[0].code[6:-2]
-            return Expr(f"InvokeAfter({args[1].code}, [this]() {{ {to_pascal(method)}(); }})", "void")
+            return Expr(f"InvokeAfter({args[1].code}, [this]() {{ {method_cpp_name(method, ctx.owner_kind)}(); }})", "void")
         if name == "GetComponent":
             cs = self.generic_arg()
             self.call_args()
@@ -1122,7 +1158,7 @@ class RuleTranslator:
         if not self.at("("):
             raise Unsupported(f"referencia a método {name} sin llamar")
         args = self.call_args()
-        cpp = to_pascal(name)
+        cpp = method_cpp_name(name, ctx.owner_kind)
         return Expr(f"{cpp}({', '.join(a.code for a in args)})", ctx.method_returns.get(name, "void"))
 
     def _parent_actor(self, e: Expr) -> str:
@@ -1150,11 +1186,16 @@ class RuleTranslator:
                     f"{COMPAT}::UnityToUnrealQuat({args[2].code}).Rotator(){parent})")
         else:
             raise Unsupported("Instantiate con otros argumentos")
-        if pk in ("pcomponent", "ucomponent"):
-            cls = self.ctx.cpp_class(prefab.type)
-            return Expr(f"{call}->FindComponentByClass<{cls}>()", prefab.type)
-        if pk in ("gameobject", "transform", "unknown"):
+        if pk == "prefab":
+            inner = _strip(prefab.type)[len("Prefab<"):-1]
+            if self.ctx.kind(inner) in ("pcomponent", "ucomponent"):
+                cls = self.ctx.cpp_class(inner)
+                return Expr(f"{call}->FindComponentByClass<{cls}>()", inner)
             return Expr(call, "GameObject")
+        if pk in ("pcomponent", "ucomponent"):
+            raise Unsupported("Instantiate de una instancia de componente (el campo no se reconoció como prefab)")
+        if pk in ("gameobject", "transform"):
+            raise Unsupported("Instantiate de un GameObject de escena (no es TSubclassOf)")
         raise Unsupported(f"Instantiate de {prefab.type}")
 
     def destroy(self, args: list[Expr]) -> Expr:
@@ -1203,6 +1244,8 @@ class RuleTranslator:
         if self.at("("):
             args = self.call_args()
             return Expr(f"{pt.cpp_name}::{cpp_member}({', '.join(a.code for a in args)})", mtype)
+        if pt.cs_type is not None and any(m.name == member for m in pt.cs_type.methods):
+            raise Unsupported(f"referencia a método {name}.{member} sin llamar")
         if member in (pt.cs_type.enum_values if pt.cs_type else []):
             return Expr(f"{pt.cpp_name}::{member}", name)
         nested = self.ctx.types.get(mtype) if mtype == member else None
@@ -1345,7 +1388,8 @@ class RuleTranslator:
                 raise Unsupported("LoadScene por índice")
             return Expr(f"{COMPAT}::LoadScene(this, FName(*({args[0].code})))", "void")
         if name == "Camera" and member == "main":
-            return Expr(f"{COMPAT}::GetMainCamera(this)", "Camera")
+            ctx.includes |= {"Camera/CameraComponent.h", "Camera/CameraActor.h"}
+            return Expr(f"{COMPAT}::GetMainCamera(this)->FindComponentByClass<UCameraComponent>()", "Camera")
         if name == "PlayerPrefs":
             if member not in PREFS:
                 raise Unsupported(f"PlayerPrefs.{member}")
@@ -1405,8 +1449,10 @@ class RuleTranslator:
                 if self.at("("):
                     args = self.call_args()
                     return Expr(f"{code}->{cpp_member}({', '.join(a.code for a in args)})", mtype)
-                return Expr(f"{code}->{cpp_member}", mtype)
+                return Expr(f"{code}->{cpp_member}", ctx.typed(mtype, member))
             return self.unity_component_member(e, member)
+        if k == "prefab":
+            raise Unsupported("acceso a un miembro de un prefab (TSubclassOf)")
         if k == "vector":
             if member in VECTOR_MEMBERS:
                 m = VECTOR_MEMBERS[member]
@@ -1578,8 +1624,6 @@ class RuleTranslator:
         if base in ("Collider", "BoxCollider", "SphereCollider", "CapsuleCollider") and member == "enabled":
             return Expr(f"{code}->IsCollisionEnabled()", "bool",
                         setter=lambda rhs: f"{code}->SetCollisionEnabled(({rhs}) ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision)")
-        if base == "Camera" and member == "transform":
-            return Expr(f"{code}->GetRootComponent()", "Transform")
         raise Unsupported(f"{base}.{member}")
 
 

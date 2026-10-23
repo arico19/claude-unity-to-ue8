@@ -108,7 +108,7 @@ OBJECT_TYPES: dict[str, tuple[str, str]] = {
     "Object": ("UObject", "UObject/Object.h"),
 }
 # Tipos que en Unity se usan como "plantilla a instanciar" (prefab) -> clase
-PREFAB_HINT = re.compile(r"prefab|template|spawn", re.I)
+PREFAB_HINT = re.compile(r"prefab|template|tospawn|spawnable", re.I)
 
 CONTAINERS = {
     "List": "TArray", "IList": "TArray", "IEnumerable": "TArray", "Queue": "TArray", "Stack": "TArray",
@@ -222,7 +222,9 @@ class TypeMapper:
             includes |= i.includes
             forward |= i.forward
             ok = ok and i.uproperty and not i.decl.startswith(("TArray", "TMap", "TSet"))
-        args = ", ".join(i.decl for i in inner)
+        # Dentro de contenedores se usan punteros crudos (UFoo*), no TObjectPtr: UHT no admite
+        # TObjectPtr en parámetros/retornos de UFUNCTION y así campo y parámetro tienen el mismo tipo.
+        args = ", ".join(i.param if i.is_object else i.decl for i in inner)
         decl = f"{kind}<{args}>"
         return CppType(decl, f"const {decl}&", ok, includes, forward,
                        note=note or next((i.note for i in inner if i.note), None))

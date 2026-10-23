@@ -26,7 +26,7 @@ def test_component_generation(sample_project):
     assert "float MoveSpeed = 5.f;" in header
     assert "EMoveMode Mode = EMoveMode::Run;" in header
     assert "TSubclassOf<AActor> BulletPrefab;" in header
-    assert "TArray<TObjectPtr<USoundBase>> Footsteps;" in header
+    assert "TArray<USoundBase*> Footsteps;" in header  # punteros crudos en contenedores (UFUNCTION)
     assert "virtual void Update(float DeltaTime) override;" in header
     assert "virtual void OnTriggerEnter(AActor* Other) override;" in header
     assert "void Fire(float Spread, int32 Count = 1);" in header
@@ -66,7 +66,7 @@ def test_scriptable_object_and_editor():
 def test_type_mapper():
     m = TypeMapper()
     assert m.map("List<Vector3>").decl == "TArray<FVector>"
-    assert m.map("Dictionary<string, GameObject>").decl == "TMap<FString, TObjectPtr<AActor>>"
+    assert m.map("Dictionary<string, GameObject>").decl == "TMap<FString, AActor*>"
     assert m.map("float[]").decl == "TArray<float>"
     assert m.map("GameObject", "enemyPrefab").decl == "TSubclassOf<AActor>"
     assert not m.map("NavMeshPath").uproperty
