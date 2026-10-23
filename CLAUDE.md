@@ -68,6 +68,15 @@ Subagentes: `unity-analyzer`, `csharp-to-cpp`, `cpp-reviewer`, `ue-content-build
   niveles. Si renombras una propiedad al traducir, actualiza también los datos o el log del editor
   avisará de que no pudo asignar el valor.
 
+## Genérico vs. por proyecto
+
+Este repo es un conversor **general** de proyectos Unity → UE 5.8; no debe contener lógica de ningún juego
+concreto. Lo específico de cada proyecto convertido vive en su `<ProyectoUE>/`: `Unity2UE/personajes.json`,
+`Unity2UE/armas.json`, `Unity2UE/custom_*` y los retoques `Content/Python/unity2ue_import/extra/*.py`.
+Las docs generales son `docs/01` y `docs/02`; `docs/ejemplos/<proyecto>/` guarda las guías de casos reales
+(in-coming es el primero y sirve de banco de pruebas: nunca escribir en él al probar el conversor; copia
+completa en `G:\unitytoue8_pruebas\InComingUE_copia_2026-10-23`).
+
 ## Reglas para trabajar en este repo
 
 - Todo cambio en conversores necesita test en `tests/`. Amplía el fixture

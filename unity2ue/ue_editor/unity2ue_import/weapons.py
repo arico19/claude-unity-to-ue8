@@ -24,7 +24,7 @@ prefabs convertidos, con el arma original de Unity):
 
 - ``alternativas`` (lista, al nivel de ``arma``): armas que cada personaje lleva ya puestas pero
   ocultas (``Arma_<nombre>`` y su boca ``Boca_<nombre>``) para que el juego las cambie en partida;
-  in-coming pone así el lanzallamas al coger la primera banderola amarilla.
+  (por ejemplo, un lanzallamas que el jugador obtiene al recoger una recompensa).
 - ``integrada``: el arma forma parte de la malla del personaje (ranura de material con ese nombre),
   como el TommyGun del soldado: al poner otra arma esa ranura se oculta y se restaura al volver.
 - ``fichero``: FBX/GLB/OBJ que se importa como StaticMesh en ``/Game/Armas/<nombre>`` (una vez).

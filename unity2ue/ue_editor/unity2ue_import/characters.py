@@ -9,8 +9,8 @@ Configuración: ``<ProyectoUE>/Unity2UE/personajes.json``
     {
       "plantilla": "/Game/Unity/animations/BP_US_Soldier_Humanoid",
       "personajes": {
-        "Ch44":  {"fichero": "C:/Users/yo/Downloads/Ch44_nonPBR.fbx", "arma": "Lanzallamas", "mas_alto_cm": 20},
-        "Titan": {"fichero": "C:/.../Titan.fbx", "arma": "Lanzallamas", "mas_alto_cm": 40}
+        "Robot":   {"fichero": "C:/Modelos/Robot.fbx",   "arma": "Rifle", "mas_alto_cm": 20},
+        "Gigante": {"fichero": "C:/Modelos/Gigante.fbx", "arma": "Rifle", "mas_alto_cm": 40}
       }
     }
 

@@ -1,7 +1,7 @@
 # Cambios del 28 de septiembre de 2026 en in-coming (resumen para leer con calma)
 
 Proyecto: `G:\unitytoue8_pruebas\InComingUE`. La guía de uso detallada de personajes y armas está en
-`03-personajes-y-armas-en-in-coming.md`; aquí va lo que se hizo y cómo funciona ahora el juego.
+`03-personajes-y-armas.md`; aquí va lo que se hizo y cómo funciona ahora el juego.
 
 ## 1. Cómo funciona ahora una partida
 
