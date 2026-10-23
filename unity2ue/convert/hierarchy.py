@@ -14,7 +14,7 @@ from ..unity import class_ids as C
 from ..unity.yaml_parser import UnityDocument, UnityObject, ref_file_id, ref_guid
 from .components import convert_component, merge_render_components
 from .context import ConversionContext
-from .coords import color_to_linear, transform_to_ue
+from .coords import color_to_linear, compose, relative, transform_to_ue
 
 _TRANSFORM_PROPS = ("m_LocalPosition", "m_LocalRotation", "m_LocalScale")
 
@@ -368,12 +368,16 @@ class HierarchyConverter:
           ya están en el esqueleto. Se eliminan salvo que lleven algo colgado (p.ej. un arma).
         """
         bones: set[int] = set()
+        bone_owner: dict[int, UnityObject] = {}  # hueso -> SkinnedMeshRenderer que lo usa
         for smr in self.doc.by_class(C.SKINNED_MESH_RENDERER):
-            bones |= {ref_file_id(b) for b in smr.get("m_Bones") or []}
-            bones.add(ref_file_id(smr.get("m_RootBone")))
-        bones.discard(0)
+            ids = {ref_file_id(b) for b in smr.get("m_Bones") or []} | {ref_file_id(smr.get("m_RootBone"))}
+            ids.discard(0)
+            bones |= ids
+            for b in ids:
+                bone_owner.setdefault(b, smr)
         tid_of = {id(n): tid for tid, n in self.nodes_by_transform.items()}
         identity = transform_to_ue({"x": 0, "y": 0, "z": 0}, {"x": 0, "y": 0, "z": 0, "w": 1}, {"x": 1, "y": 1, "z": 1})
+        self._attach_to_bones(roots, bones, bone_owner, tid_of)
         pruned = 0
 
         def visit(node: dict[str, Any]) -> bool:
@@ -394,6 +398,58 @@ class HierarchyConverter:
         roots[:] = [r for r in roots if visit(r)]
         if pruned:
             self.ctx.info(self.path, f"{pruned} huesos sin nada colgado omitidos (ya están en el esqueleto de UE)")
+
+    def _attach_to_bones(self, roots: list[dict[str, Any]], bones: set[int],
+                         bone_owner: dict[int, UnityObject], tid_of: dict[int, int]) -> None:
+        """Lo que cuelga de un hueso (un arma en la mano...) pasa a colgar del hueso en UE.
+
+        En Unity el hueso es un Transform que la animación mueve y el arma lo sigue. En UE los
+        huesos no son componentes: el arma se mueve junto a la malla con skin y se marca con
+        ``attach_bone`` para que el Blueprint la ancle a ese hueso (socket del padre). Su
+        ``transform`` pasa a ser relativo al componente de la malla, en la pose de reposo de Unity;
+        el editor lo reexpresa respecto al hueso con la pose de referencia del esqueleto de UE.
+        """
+        parent_of: dict[int, dict[str, Any] | None] = {}
+        world: dict[int, dict[str, Any]] = {}
+        unit = {"location": [0.0, 0.0, 0.0], "rotation_quat": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0]}
+
+        def index(node: dict[str, Any], parent: dict[str, Any] | None) -> None:
+            parent_of[id(node)] = parent
+            world[id(node)] = compose(world[id(parent)] if parent else unit, node.get("transform") or unit)
+            for ch in node.get("children", []):
+                index(ch, node)
+
+        for r in roots:
+            index(r, None)
+        node_of_go = {self.transform_owner.get(tid): n for tid, n in self.nodes_by_transform.items()}
+        moved = 0
+        for tid, bone in list(self.nodes_by_transform.items()):
+            if tid not in bones or id(bone) not in world:
+                continue
+            smr = bone_owner[tid]
+            smr_node = node_of_go.get(ref_file_id(smr.get("m_GameObject")))
+            mesh = next((c for c in (smr_node or {}).get("components", []) if c.get("type") == "SkeletalMesh"), None)
+            if smr_node is None or mesh is None:
+                continue
+            for child in list(bone.get("children", [])):
+                if tid_of.get(id(child)) in bones:
+                    continue
+                if not child.get("components") and not child.get("children") and not child.get("prefab"):
+                    continue  # punta de hueso vacía (p.ej. el dedo del pie que no usa el skin)
+                # Marco del componente de la malla: su nodo pasa a identidad (ver _fix_skinned_meshes),
+                # salvo en instancias de modelo, donde conserva su transform.
+                owner = smr_node if smr_node.get("model_instance") else parent_of[id(smr_node)]
+                frame = world[id(owner)] if owner else unit
+                bone["children"].remove(child)
+                child["transform"] = relative(frame, world[id(child)])
+                child["attach_bone"] = bone["name"]
+                # Pose de reposo del hueso en ese mismo marco: el editor la compara con la de UE.
+                child["attach_bone_rest"] = relative(frame, world[id(bone)])
+                child["attach_mesh"] = mesh.get("mesh")
+                smr_node["children"].append(child)
+                moved += 1
+        if moved:
+            self.ctx.info(self.path, f"{moved} objetos colgados de huesos se anclan al hueso en UE (siguen la animación)")
 
     def environment(self) -> dict[str, Any]:
         rs = next(iter(self.doc.by_class(C.RENDER_SETTINGS)), None)

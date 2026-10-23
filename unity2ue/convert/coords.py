@@ -105,6 +105,49 @@ def transform_to_ue(position: Any, rotation: Any, scale: Any) -> dict[str, list[
     }
 
 
+def quat_mul(a: Sequence[float], b: Sequence[float]) -> Quat:
+    """a*b (aplica b y después a), convención de FQuat y de Unity."""
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz)
+
+
+def quat_inv(q: Sequence[float]) -> Quat:
+    return (-q[0], -q[1], -q[2], q[3])
+
+
+def quat_rotate(q: Sequence[float], v: Sequence[float]) -> Vec3:
+    x, y, z, _ = quat_mul(quat_mul(q, (v[0], v[1], v[2], 0.0)), quat_inv(q))
+    return (x, y, z)
+
+
+def compose(parent: dict[str, Any], local: dict[str, Any]) -> dict[str, Any]:
+    """Transform (formato UE) de un hijo en el espacio del abuelo: parent ∘ local (sin cizalla)."""
+    ps, pq = parent["scale"], parent["rotation_quat"]
+    scaled = [local["location"][i] * ps[i] for i in range(3)]
+    off = quat_rotate(pq, scaled)
+    q = quat_mul(pq, local["rotation_quat"])
+    return {"location": [parent["location"][i] + off[i] for i in range(3)],
+            "rotation_quat": list(q),
+            "scale": [ps[i] * local["scale"][i] for i in range(3)]}
+
+
+def relative(frame: dict[str, Any], world: dict[str, Any]) -> dict[str, Any]:
+    """Inversa de compose: transform de ``world`` expresado en el espacio de ``frame``."""
+    inv = quat_inv(frame["rotation_quat"])
+    d = quat_rotate(inv, [world["location"][i] - frame["location"][i] for i in range(3)])
+    fs = [s or 1.0 for s in frame["scale"]]
+    q = quat_mul(inv, world["rotation_quat"])
+    q = tuple(round(c, 8) for c in q)
+    return {"location": [round(d[i] / fs[i], 5) for i in range(3)],
+            "rotation_quat": list(q),
+            "rotation": list(ue_quat_to_rotator(q)),
+            "scale": [round(world["scale"][i] / fs[i], 6) for i in range(3)]}
+
+
 def color_to_linear(c: Any) -> list[float]:
     """Color Unity {r,g,b,a} -> [r,g,b,a]. Unity guarda colores en espacio gamma."""
     if not isinstance(c, dict):

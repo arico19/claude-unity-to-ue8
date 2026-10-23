@@ -111,6 +111,41 @@ class UERunner:
         self.log(f"  Resultado: {data.get('summary')}")
         return data
 
+    def change_weapon(self, name: str | None, spec: dict | None = None) -> dict:
+        """Cambia el arma de los personajes (unity2ue_import/weapons.py, Unity2UE/armas.json)."""
+        self.sync_editor_scripts()
+        os.environ["UNITY2UE_ARMA"] = name or ""
+        os.environ["UNITY2UE_ARMA_DATOS"] = json.dumps(spec or {})
+        self.log(f"Cambiando el arma{' a ' + name if name else ''}...")
+        self._python("unity2ue_import/cambiar_arma.py", "armas.log", 1800)
+        return self._load("armas_log.json")
+
+    def characters(self, restore_data: bool = False) -> dict:
+        """Aplica Unity2UE/personajes.json y armas.json (pasos "characters" y "weapons" del import).
+
+        restore_data: vuelve a escribir antes los DataAssets desde Unity (deshace "usar_como" quitados).
+        """
+        self.sync_editor_scripts()
+        os.environ["UNITY2UE_STEPS"] = ("data," if restore_data else "") + "characters,weapons"
+        try:
+            return self.import_content()
+        finally:
+            os.environ.pop("UNITY2UE_STEPS", None)
+
+    def portraits(self) -> list[str]:
+        """Retratos de los personajes armados en su pose de disparo (Unity2UE/retratos)."""
+        self.sync_editor_scripts()
+        self.log("Haciendo retratos de los personajes (se abre el editor ~1 min)...")
+        exe = self.ue / "Engine" / "Binaries" / "Win64" / "UnrealEditor.exe"
+        out = self.dir / "Unity2UE" / "retratos"
+        shutil.rmtree(out, ignore_errors=True)
+        try:
+            self._run([str(exe), str(self.uproject), "-ExecutePythonScript=unity2ue_import/portraits.py",
+                       "-unattended", "-nosplash", "-nop4", "-log"], "retratos.log", 900)
+        except subprocess.TimeoutExpired:
+            self.log("  El editor no terminó a tiempo; retratos parciales")
+        return sorted(str(p) for p in out.glob("*.png")) if out.exists() else []
+
     def verify(self) -> dict:
         self.log("[UE 3/4] Verificando niveles y assets...")
         self._python("unity2ue_import/verify.py", "verify.log", 1800)

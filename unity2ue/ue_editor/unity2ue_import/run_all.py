@@ -23,16 +23,18 @@ import unreal  # noqa: E402
 from unity2ue_import import (  # noqa: E402
     anim_clips,
     blueprints,
+    characters,
     data_assets,
     humanoid_retarget,
     import_assets,
     input_actions,
     levels,
     materials,
+    weapons,
 )
 from unity2ue_import.common import LOG, load_json, save_all_dirty  # noqa: E402
 
-ALL_STEPS = ("assets", "anims", "materials", "input", "blueprints", "humanoid", "data", "levels", "extra")
+ALL_STEPS = ("assets", "anims", "materials", "input", "blueprints", "humanoid", "data", "levels", "extra", "characters", "weapons")
 
 
 def run_extras() -> None:
@@ -94,6 +96,14 @@ def main(steps: tuple[str, ...] | None = None) -> str:
         save_all_dirty()
     if "extra" in steps:
         run_extras()
+        save_all_dirty()
+    if "characters" in steps:
+        # Personajes alternativos (Unity2UE/personajes.json): Blueprints con otros modelos con rig.
+        characters.run()
+        save_all_dirty()
+    if "weapons" in steps:
+        # Armas en la mano (Unity2UE/armas.json): se reaplica el arma elegida tras reconstruir los Blueprints.
+        weapons.run()
         save_all_dirty()
     path = LOG.save()
     summary = {}

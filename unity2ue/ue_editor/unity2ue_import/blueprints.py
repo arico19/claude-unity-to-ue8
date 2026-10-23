@@ -20,7 +20,8 @@ STEP = "blueprints"
 SDS = None
 LIB = unreal.SubobjectDataBlueprintFunctionLibrary
 
-_SKELETAL_USED: set[str] = set()  # SkeletalMesh ya añadidas en el Blueprint en construcción
+_SKELETAL_USED: dict[str, str] = {}  # SkeletalMesh ya añadidas en el Blueprint -> nombre del componente
+_ON_BONES: list[tuple[dict, str]] = []  # (nodo, item) que cuelgan de un hueso: se anclan al final
 _BP_ROOT: list[dict] = [{}]  # nodo raíz del prefab en construcción
 
 
@@ -68,8 +69,13 @@ def _add(bp, parent_handle, cls, name: str):
     return handle
 
 
+def component_name(name: str) -> str:
+    """Nombre de componente válido para un GameObject (el que llevará en el Blueprint)."""
+    return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name) or "Component"
+
+
 def _unique(name: str, used: set[str]) -> str:
-    base = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name) or "Component"
+    base = component_name(name)
     out, i = base, 1
     while out in used:
         i += 1
@@ -124,7 +130,7 @@ def _add_components(bp, parent_handle, node: dict, used: set[str], item: str, sk
                 LOG.add(STEP, item, "info", f"Parte de la malla {mesh.get_name()} ya añadida: se omite")
                 continue
             if mesh is not None:
-                _SKELETAL_USED.add(mesh.get_path_name())
+                _SKELETAL_USED[mesh.get_path_name()] = ""
                 # Materiales de TODAS las partes (cuerpo, cabeza, manos) para repartirlos por ranura.
                 guid = (c.get("mesh") or {}).get("guid")
                 c = dict(c, part_materials=[m for n in _walk(_BP_ROOT[0]) for pc in n.get("components", [])
@@ -137,8 +143,11 @@ def _add_components(bp, parent_handle, node: dict, used: set[str], item: str, sk
                 LOG.warn(STEP, item, f"Clase C++ {c.get('cpp_class')} no encontrada (¿módulo compilado?)")
             continue
         try:
-            h = _add(bp, parent_handle, cls, _unique(c.get("cpp_class") or t, used))
+            name = _unique(c.get("cpp_class") or t, used)
+            h = _add(bp, parent_handle, cls, name)
             comps.configure(_obj(h), c, node, item)
+            if t == "SkeletalMesh" and mesh is not None:
+                _SKELETAL_USED[mesh.get_path_name()] = name
         except Exception:  # noqa: BLE001
             LOG.exception(STEP, f"{item}:{t}")
     # MeshCollider -> colisión compleja de la malla estática
@@ -146,31 +155,127 @@ def _add_components(bp, parent_handle, node: dict, used: set[str], item: str, sk
         LOG.warn(STEP, item, "MeshCollider: activa 'Use Complex Collision As Simple' en la malla si es estática")
 
 
+def _build_child(bp, parent_handle, child: dict, used: set[str], item: str, transform=None) -> str:
+    """Crea el componente de un GameObject hijo (y su subárbol); devuelve su nombre."""
+    name = _unique(child.get("name", "Child"), used)
+    if child.get("prefab"):
+        h = _add(bp, parent_handle, unreal.ChildActorComponent, name)
+        comp = _obj(h)
+        cls = resolve_class(child["prefab"].get("ue_class_path"))
+        if cls is not None:
+            set_prop(comp, "child_actor_class", cls, STEP, item)
+        else:
+            LOG.warn(STEP, item, f"Prefab anidado sin Blueprint: {child['prefab'].get('unity_path')}")
+    else:
+        h = _add(bp, parent_handle, unreal.SceneComponent, name)
+        comp = _obj(h)
+    if transform is None:
+        t = child["transform"]
+        transform = unreal.Transform(vec(t["location"]), rot_from_quat(t["rotation_quat"]), vec(t["scale"]))
+    set_prop(comp, "relative_location", transform.translation)
+    set_prop(comp, "relative_rotation", transform.rotation.rotator())
+    set_prop(comp, "relative_scale3d", transform.scale3d)
+    if not child.get("active", True):
+        set_prop(comp, "visible", False)
+    _add_components(bp, h, child, used, f"{item}/{child.get('name')}", set())
+    _build_children(bp, h, child, used, f"{item}/{child.get('name')}")
+    return name
+
+
 def _build_children(bp, parent_handle, node: dict, used: set[str], item: str) -> None:
     for child in node.get("children", []):
-        name = _unique(child.get("name", "Child"), used)
+        if child.get("attach_bone"):
+            _ON_BONES.append((child, item))  # cuando exista el componente de la malla con skin
+            continue
         try:
-            if child.get("prefab"):
-                h = _add(bp, parent_handle, unreal.ChildActorComponent, name)
-                comp = _obj(h)
-                cls = resolve_class(child["prefab"].get("ue_class_path"))
-                if cls is not None:
-                    set_prop(comp, "child_actor_class", cls, STEP, item)
-                else:
-                    LOG.warn(STEP, item, f"Prefab anidado sin Blueprint: {child['prefab'].get('unity_path')}")
-            else:
-                h = _add(bp, parent_handle, unreal.SceneComponent, name)
-                comp = _obj(h)
-            t = child["transform"]
-            set_prop(comp, "relative_location", vec(t["location"]))
-            set_prop(comp, "relative_rotation", rot_from_quat(t["rotation_quat"]))
-            set_prop(comp, "relative_scale3d", vec(t["scale"]))
-            if not child.get("active", True):
-                set_prop(comp, "visible", False)
-            _add_components(bp, h, child, used, f"{item}/{child.get('name')}", set())
-            _build_children(bp, h, child, used, f"{item}/{child.get('name')}")
+            _build_child(bp, parent_handle, child, used, item)
         except Exception:  # noqa: BLE001
             LOG.exception(STEP, f"{item}/{child.get('name')}")
+
+
+def _handle_named(bp, name: str):
+    for h in _sds().k2_gather_subobject_data_for_blueprint(bp):
+        if str(LIB.get_variable_name(LIB.get_data(h))) == name:
+            return h
+    return None
+
+
+def var_name(handle) -> str:
+    return str(LIB.get_variable_name(LIB.get_data(handle)))
+
+
+def parent_name(handle) -> str | None:
+    """Nombre del componente padre (``is_attached_to`` no sirve para esto en UE 5.8)."""
+    parent = LIB.get_parent_handle(LIB.get_data(handle))
+    if parent is None or not LIB.is_handle_valid(parent) or LIB.get_data(parent) is None:
+        return None
+    return var_name(parent)
+
+
+def children(bp, handle) -> list:
+    """Handles de los hijos directos de ``handle`` en el Blueprint."""
+    name = var_name(handle)
+    seen, out = set(), []
+    for h in _sds().k2_gather_subobject_data_for_blueprint(bp):
+        n = var_name(h)
+        if n not in seen and parent_name(h) == name:
+            seen.add(n)
+            out.append(h)
+    return out
+
+
+def _norm(bone: str) -> str:
+    return "".join(ch for ch in bone.lower() if ch.isalnum())
+
+
+def _transform(t: dict):
+    return unreal.Transform(vec(t["location"]), rot_from_quat(t["rotation_quat"]), vec(t["scale"]))
+
+
+def bone_grip(child: dict, mesh, where: str):
+    """(hueso de UE, transform respecto al hueso) de un nodo con ``attach_bone`` sobre ``mesh``.
+
+    El transform del JSON es la pose de reposo de Unity respecto a la malla; se reexpresa respecto
+    al hueso con la pose de referencia del esqueleto de UE (los ejes locales de los huesos cambian
+    al importar el FBX, así que el transform local de Unity no vale tal cual).
+    """
+    pose = unreal.AnimPoseExtensions.get_reference_pose(mesh.get_editor_property("skeleton"))
+    names = {_norm(str(n)): str(n) for n in unreal.AnimPoseExtensions.get_bone_names(pose)}
+    bone = names.get(_norm(child["attach_bone"]))
+    if bone is None:
+        return None, None
+    bone_ref = unreal.AnimPoseExtensions.get_bone_pose(pose, bone, unreal.AnimPoseSpaces.WORLD)
+    if child.get("attach_bone_rest"):
+        gap = (bone_ref.translation - _transform(child["attach_bone_rest"]).translation).length()
+        if gap > 2.0:
+            LOG.warn(STEP, where, f"El hueso {bone} está a {gap:.1f} cm de su sitio en Unity: "
+                                  "revisa la posición del objeto anclado")
+    return bone, unreal.MathLibrary.make_relative_transform(_transform(child["transform"]), bone_ref)
+
+
+def _attach_on_bones(bp, root_handle, used: set[str]) -> None:
+    """Ancla a su hueso lo que en Unity colgaba de un hueso (armas...): así sigue la animación."""
+    for child, item in _ON_BONES:
+        where = f"{item}/{child.get('name')}"
+        try:
+            mesh = resolve_mesh(child.get("attach_mesh"), skeletal=True)
+            parent = _handle_named(bp, _SKELETAL_USED.get(mesh.get_path_name(), "")) if mesh else None
+            if parent is None:
+                LOG.warn(STEP, where, f"Sin malla con skin para el hueso {child['attach_bone']}: queda fijo")
+                _build_child(bp, root_handle, child, used, item)
+                continue
+            bone, rel = bone_grip(child, mesh, where)
+            if bone is None:
+                LOG.warn(STEP, where, f"El esqueleto no tiene el hueso {child['attach_bone']}: queda fijo")
+                _build_child(bp, parent, child, used, item)
+                continue
+            name = _build_child(bp, parent, child, used, item, rel)
+            if unreal.UnityCompatLibrary.set_component_attach_socket(bp, name, bone):
+                LOG.ok(STEP, where, f"anclado al hueso {bone}")
+            else:
+                LOG.warn(STEP, where, f"No se pudo anclar al hueso {bone}")
+        except Exception:  # noqa: BLE001
+            LOG.exception(STEP, where)
 
 
 def _reuse_existing(package_path: str, parent_class, item: str):
@@ -200,6 +305,7 @@ def build_blueprint(package_path: str, root: dict, parent_class=None, item: str 
     folder, name = package_path.rsplit("/", 1)
     ensure_dir(folder)
     _SKELETAL_USED.clear()
+    _ON_BONES.clear()
     _BP_ROOT[0] = root
     bp = _reuse_existing(package_path, parent_class or unreal.Actor, item)
     if bp is None:
@@ -251,6 +357,7 @@ def build_blueprint(package_path: str, root: dict, parent_class=None, item: str 
             LOG.warn(STEP, item, "Rigidbody sin colisión ni malla: no se simula física")
     _add_components(bp, root_handle, root, used, item, skip)
     _build_children(bp, root_handle, root, used, item)
+    _attach_on_bones(bp, root_handle, used)
     # Tag/capa del GameObject raíz como tags del actor
     try:
         cdo = unreal.get_default_object(bp.generated_class())

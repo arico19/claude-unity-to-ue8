@@ -106,8 +106,10 @@ plan de la herramienta para cambiar personajes, así que otra sesión puede reto
 
 ## Pendientes
 
-- [ ] Herramienta para cambiar los stickmen y el personaje del jugador por otros modelos (a la espera
-      de instrucciones; el retarget Humanoid ya hecho sirve de base)
+- [ ] Herramienta para cambiar personajes, dentro del proyecto Unreal (no en la app): los bosses, los
+      enanos que se acercan y el personaje del jugador. Este último se sustituye al empezar la partida
+      (otro prefab en lugar del soldado US) y de nuevo al recoger otro tipo de banderola. A la espera de
+      instrucciones; el retarget Humanoid ya hecho sirve de base
 - [ ] Dimensiones del carril: el grupo puede salirse de la pasarela de 6 m (en Unity pasa igual)
 - [ ] El fusil flota: hay que engancharlo al hueso de la mano
 - [ ] Convertir la interfaz uGUI (botón de empezar, marcador) a UMG

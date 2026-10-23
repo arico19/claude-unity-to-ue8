@@ -10,6 +10,7 @@
 
 class ACameraActor;
 class UAnimSequence;
+class UBlueprint;
 
 /** Unity trabaja en metros, UE en centímetros. Los valores serializados (UPROPERTY/DataAsset)
  *  se conservan en metros: multiplicar por UNITY_TO_UE al usarlos como distancia o velocidad. */
@@ -101,4 +102,10 @@ public:
 	/** Animation.Play / CrossFade: reproduce el clip en el primer SkeletalMesh del actor (no hace nada si es null). */
 	UFUNCTION(BlueprintCallable, Category = "Unity|Animation")
 	static void PlayAnimation(AActor* Actor, UAnimSequence* Clip, bool bLoop = true);
+
+	/** Sólo editor (scripts de importación y de cambio de arma): ancla el componente ComponentName
+	 *  del Blueprint al hueso o socket SocketName de su componente padre (el campo "Parent Socket"
+	 *  del editor, que la API Python no expone). None lo desancla. Compila el Blueprint después. */
+	UFUNCTION(BlueprintCallable, Category = "Unity|Editor")
+	static bool SetComponentAttachSocket(UBlueprint* Blueprint, FName ComponentName, FName SocketName);
 };

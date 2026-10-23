@@ -12,6 +12,8 @@ se asignan los clips a las propiedades ``<Estado>Clip`` de los scripts del Bluep
 
 from __future__ import annotations
 
+import math
+
 import unreal
 
 from . import anim_retarget as R
@@ -56,6 +58,24 @@ def _match(names: list[str], human: dict[str, str]) -> dict[str, str]:
     return out
 
 
+def _heading(pose, human_map: dict) -> float | None:
+    """Hacia dónde mira el esqueleto en reposo (grados, 0 = +X): perpendicular a la línea de las manos."""
+    if "LeftHand" not in human_map or "RightHand" not in human_map:
+        return None
+    lh = unreal.AnimPoseExtensions.get_bone_pose(pose, human_map["LeftHand"], unreal.AnimPoseSpaces.WORLD).translation
+    rh = unreal.AnimPoseExtensions.get_bone_pose(pose, human_map["RightHand"], unreal.AnimPoseSpaces.WORLD).translation
+    # En UE (X adelante, Y derecha) la mano derecha queda a +90° de hacia donde se mira.
+    return math.degrees(math.atan2(rh.y - lh.y, rh.x - lh.x)) - 90.0
+
+
+def _facing_quat(src_pose, src_map: dict, tgt_pose, tgt_map: dict):
+    hs, ht = _heading(src_pose, src_map), _heading(tgt_pose, tgt_map)
+    if hs is None or ht is None:
+        return (0.0, 0.0, 0.0, 1.0)
+    a = math.radians(round((ht - hs) / 90.0) * 90.0)  # sólo giros de 90° (ejes de importación)
+    return (0.0, 0.0, math.sin(a / 2.0), math.cos(a / 2.0))
+
+
 def _retarget(seq, src_human: dict, tgt_skel, tgt_human: dict):
     src_skel = seq.get_editor_property("skeleton")
     src_pose, src_names = _bone_names(src_skel)
@@ -68,6 +88,10 @@ def _retarget(seq, src_human: dict, tgt_skel, tgt_human: dict):
     s_world0 = {b: R._t(unreal.AnimPoseExtensions.get_bone_pose(src_pose, b, unreal.AnimPoseSpaces.WORLD))
                 for b in set(pairs.values())}
     t_hips, s_hips = tgt_map["Hips"], src_map["Hips"]
+    # Los giros se transfieren en espacio mundo: si los dos esqueletos no miran hacia el mismo lado en
+    # reposo (p.ej. Mixamo importado mirando a +Y y el origen a +X), se pasan al marco del destino.
+    face = _facing_quat(src_pose, src_map, tgt_pose, tgt_map)
+    face_inv = R.qinv(face)
     height = t_world0[t_hips][0][2] / s_world0[s_hips][0][2] if abs(s_world0[s_hips][0][2]) > 1e-3 else 1.0
     frames = unreal.AnimationLibrary.get_num_frames(seq)
     opts = unreal.AnimPoseEvaluationOptions()
@@ -83,10 +107,12 @@ def _retarget(seq, src_human: dict, tgt_skel, tgt_human: dict):
                 w = t_world0[b]
             elif src is not None:
                 sw = R._t(unreal.AnimPoseExtensions.get_bone_pose(pose, src, unreal.AnimPoseSpaces.WORLD))
-                rot = R.qmul(R.qmul(sw[1], R.qinv(s_world0[src][1])), t_world0[b][1])
+                delta = R.qmul(sw[1], R.qinv(s_world0[src][1]))
+                rot = R.qmul(R.qmul(R.qmul(face, delta), face_inv), t_world0[b][1])
                 rest = R.compose(pw, t_local0[b])
                 if b == t_hips:
-                    d = (sw[0][0] - s_world0[src][0][0], sw[0][1] - s_world0[src][0][1], sw[0][2] - s_world0[src][0][2])
+                    d = R.qrot(face, (sw[0][0] - s_world0[src][0][0], sw[0][1] - s_world0[src][0][1],
+                                      sw[0][2] - s_world0[src][0][2]))
                     base = t_world0[b][0]
                     pos = (base[0] + d[0] * height, base[1] + d[1] * height, base[2] + d[2] * height)
                 else:

@@ -9,6 +9,9 @@
 #include "Animation/AnimSequence.h"
 #include "Engine/SkeletalMesh.h"
 #include "GameFramework/PlayerController.h"
+#include "Engine/Blueprint.h"
+#include "Engine/SimpleConstructionScript.h"
+#include "Engine/SCS_Node.h"
 
 AActor* UUnityCompatLibrary::FindWithTag(const UObject* WorldContextObject, FName Tag)
 {
@@ -138,4 +141,22 @@ void UUnityCompatLibrary::PlayAnimation(AActor* Actor, UAnimSequence* Clip, bool
 			Mesh->PlayAnimation(Clip, bLoop);
 		}
 	}
+}
+
+bool UUnityCompatLibrary::SetComponentAttachSocket(UBlueprint* Blueprint, FName ComponentName, FName SocketName)
+{
+#if WITH_EDITOR
+	if (!Blueprint || !Blueprint->SimpleConstructionScript)
+	{
+		return false;
+	}
+	if (USCS_Node* Node = Blueprint->SimpleConstructionScript->FindSCSNode(ComponentName))
+	{
+		Blueprint->Modify();
+		Node->Modify();
+		Node->AttachToName = SocketName;
+		return true;
+	}
+#endif
+	return false;
 }

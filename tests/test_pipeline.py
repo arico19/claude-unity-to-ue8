@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from unity2ue.analyze import analyze_project
 from unity2ue.convert.hierarchy import iter_nodes
 
@@ -148,8 +150,20 @@ def test_skinned_mesh_ignores_node_rotation_and_prunes_bones(converted):
     body = names["Body"]
     assert body["skinned_transform_ignored"]
     assert body["transform"]["rotation_quat"] == [0.0, 0.0, 0.0, 1.0]
-    assert "Spine" not in names  # hueso sin nada colgado
-    assert {"Hips", "Hand", "Gun"} <= set(names)  # la cadena que lleva el arma se conserva
+    assert not {"Spine", "Hips", "Hand"} & set(names)  # los huesos ya están en el esqueleto de UE
+
+
+def test_object_on_bone_is_attached_to_bone(converted):
+    """Un arma hija de un hueso se ancla a ese hueso (sigue la animación) con su pose de reposo."""
+    bps = _load(converted, "blueprints.json")
+    hero = next(p for p in bps["prefabs"] if p["unity_path"] == "Assets/Prefabs/Hero.prefab")
+    body = next(n for n in iter_nodes([hero["root"]]) if n["name"] == "Body")
+    gun = next(c for c in body["children"] if c["name"] == "Gun")
+    assert gun["attach_bone"] == "Hand"
+    assert "attach_mesh" in gun  # malla con skin a la que pertenece el hueso (aquí sin FBX)
+    # Unity: Hips (0,1,0) + Hand (0.5,0,0) girado 90° en Y + Gun (0,0,0.2) -> (0.7,1,0) m
+    assert gun["transform"]["location"] == pytest.approx([0.0, 70.0, 100.0], abs=1e-3)
+    assert gun["transform"]["rotation"] == pytest.approx([0.0, 90.0, 0.0], abs=1e-3)
 
 
 def test_reconvert_keeps_unchanged_files(tmp_path, sample_project):
