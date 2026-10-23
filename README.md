@@ -43,6 +43,15 @@ manuales (`/tareas-manuales`).
 | agente `cpp-reviewer` | Revisa errores de compilación/UHT y fidelidad al C# |
 | agente `ue-content-builder` | Scripts Python de editor para contenido no automatizable |
 
+## Aplicación de escritorio (Windows)
+
+Acceso directo **"Unity a Unreal 5.8"** en el Escritorio (también en la raíz del repo; abre
+`Unity2UE.pyw` o `python -m unity2ue gui`). Se elige el proyecto Unity y la carpeta de salida y
+la aplicación hace todo: conversión, traducción por reglas de los scripts, **agente de Claude Code sólo
+para los scripts que las reglas no terminan** (y otra vez si el C++ no compila, para corregir los
+errores), compilación, importación en el editor, verificación y capturas. Muestra el progreso y el
+coste en tokens del agente. Detalles en `docs/02-como-convertir-proyectos-unity-a-unreal.md`.
+
 ## Conversión automática completa (un solo comando)
 
 ```bat
